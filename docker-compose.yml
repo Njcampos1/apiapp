@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────
+# Upper Coffee Logistics — docker-compose.yml
+#
+# network_mode: host → la impresora Zebra en la LAN es directamente
+# visible desde el contenedor sin necesidad de port-forwarding.
+# Usar en desarrollo/bodega local solamente.
+#
+# Para producción en Azure: usa Azure App Service for Containers
+# con las variables de entorno configuradas en la plataforma.
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build: .
+    image: upperapp-logistics:local
+    container_name: upperapp-logistics
+
+    # ── host mode: visibilidad directa de impresora en LAN ────────
+    network_mode: host
+
+    restart: unless-stopped
+
+    environment:
+      # Las variables se leen del archivo .env en el mismo directorio
+      - WOO_URL=${WOO_URL}
+      - WOO_KEY=${WOO_KEY}
+      - WOO_SECRET=${WOO_SECRET}
+      - ZEBRA_IP=${ZEBRA_IP:-192.168.1.100}
+      - ZEBRA_PORT=${ZEBRA_PORT:-9100}
+      - ZEBRA_DPI=${ZEBRA_DPI:-300}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - DB_PATH=/data/pedidos.db
+
+    volumes:
+      # Persistencia de la base de datos fuera del contenedor
+      - ./data:/data
+
+    # Con network_mode: host no se definen ports (el contenedor usa
+    # directamente el puerto 8000 del host)
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

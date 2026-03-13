@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upper Coffee — Bodega</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            coffee: {
+              50:  '#fdf8f0',
+              100: '#f5f0e8',
+              200: '#e8d5b0',
+              400: '#c8a96e',
+              600: '#8b6914',
+              800: '#4a3500',
+              900: '#1a1a2e',
+            }
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* Animaciones y estilos extras no disponibles en Tailwind puro */
+    @keyframes pulse-ring { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.05);opacity:.9} }
+    @keyframes slide-in   { from{transform:translateY(-12px);opacity:0} to{transform:translateY(0);opacity:1} }
+    @keyframes spin-slow  { to{transform:rotate(360deg)} }
+    .animate-pulse-ring { animation: pulse-ring 1.5s ease-in-out infinite; }
+    .animate-slide-in   { animation: slide-in .25s ease-out; }
+    .spinner { animation: spin-slow .8s linear infinite; }
+
+    /* Input de escaneo centrado y llamativo */
+    #scan-input {
+      caret-color: #c8a96e;
+      font-size: 1.5rem;
+      letter-spacing: .3em;
+    }
+    #scan-input:focus { outline: none; box-shadow: 0 0 0 4px rgba(200,169,110,.35); }
+
+    /* Scrollbar custom */
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-track { background:#f1f1f1; }
+    ::-webkit-scrollbar-thumb { background:#c8a96e; border-radius:3px; }
+  </style>
+</head>
+
+<body class="h-full bg-coffee-100 font-sans text-coffee-900">
+
+<!-- ═══════════════════════════════════════════════════════════════
+     ENCABEZADO GLOBAL
+══════════════════════════════════════════════════════════════════ -->
+<header class="bg-coffee-900 text-white shadow-xl sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <!-- Logo + título -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-coffee-400 rounded-full flex items-center justify-center flex-shrink-0">
+        <svg class="w-6 h-6 text-coffee-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2 9m13-9l2 9m-9-4h4" />
+        </svg>
+      </div>
+      <div>
+        <p class="font-bold text-lg leading-tight">Upper Coffee</p>
+        <p class="text-coffee-200 text-xs leading-tight">Gestión Logística de Bodega</p>
+      </div>
+    </div>
+
+    <!-- Navegación de vistas -->
+    <nav class="flex gap-2">
+      <button onclick="showView('dashboard')" id="tab-dashboard"
+        class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900">
+        📦 Dashboard
+      </button>
+      <button onclick="showView('scanner')" id="tab-scanner"
+        class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700">
+        🔍 Verificar
+      </button>
+    </nav>
+
+    <!-- Indicador de impresora -->
+    <div class="flex items-center gap-2 text-xs text-coffee-200">
+      <div id="printer-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500" title="Estado impresora"></div>
+      <span id="printer-label">Impresora</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     TOAST DE NOTIFICACIONES
+══════════════════════════════════════════════════════════════════ -->
+<div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     VISTA 1: DASHBOARD
+══════════════════════════════════════════════════════════════════ -->
+<section id="view-dashboard" class="max-w-7xl mx-auto px-4 py-6">
+
+  <!-- Barra de acciones -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">Pedidos en Cola</h1>
+      <p class="text-sm text-coffee-600 mt-0.5">
+        <span id="order-count">—</span> pedidos listos para preparar
+      </p>
+    </div>
+    <button onclick="loadOrders()" id="refresh-btn"
+      class="flex items-center gap-2 bg-coffee-900 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-800 active:scale-95 transition-all shadow">
+      <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Actualizar
+    </button>
+  </div>
+
+  <!-- Mensajes de error de API -->
+  <div id="api-errors" class="hidden mb-4"></div>
+
+  <!-- Estado vacío -->
+  <div id="empty-state" class="hidden text-center py-20">
+    <div class="text-7xl mb-4">✅</div>
+    <p class="text-xl font-semibold text-coffee-600">No hay pedidos pendientes</p>
+    <p class="text-sm text-coffee-400 mt-1">Todos los pedidos han sido procesados</p>
+  </div>
+
+  <!-- Tabla de pedidos -->
+  <div id="orders-loading" class="text-center py-20">
+    <svg class="spinner w-10 h-10 text-coffee-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    <p class="text-coffee-600 font-medium">Cargando pedidos...</p>
+  </div>
+
+  <div id="orders-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 hidden"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     VISTA 2: VERIFICACIÓN POR ESCÁNER RF
+══════════════════════════════════════════════════════════════════ -->
+<section id="view-scanner" class="hidden max-w-3xl mx-auto px-4 py-6">
+
+  <!-- Panel de escaneo -->
+  <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 border-2 border-coffee-200">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-12 h-12 bg-coffee-100 rounded-full flex items-center justify-center animate-pulse-ring">
+        <svg class="w-7 h-7 text-coffee-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8H3a2 2 0 00-2 2v8a2 2 0 002 2h16a2 2 0 002-2v-8a2 2 0 00-2-2h-2"/>
+        </svg>
+      </div>
+      <div>
+        <h2 class="text-xl font-bold">Verificación de Pedido</h2>
+        <p class="text-sm text-coffee-600">Escanea el QR del papel de picking o ingresa el ID manualmente</p>
+      </div>
+    </div>
+
+    <div class="flex gap-3">
+      <input
+        id="scan-input"
+        type="text"
+        inputmode="numeric"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="Escanear o digitar ID…"
+        class="flex-1 bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400"
+        onkeydown="handleScanInput(event)"
+      />
+      <button onclick="searchOrder()"
+        class="bg-coffee-900 text-white px-6 py-3 rounded-xl font-bold text-lg hover:bg-coffee-800 active:scale-95 transition-all shadow-md">
+        Buscar
+      </button>
+    </div>
+    <p class="text-xs text-coffee-400 mt-2 ml-1">
+      La pistola RF envía ENTER automáticamente al terminar de escanear
+    </p>
+  </div>
+
+  <!-- Spinner de búsqueda -->
+  <div id="scan-loading" class="hidden text-center py-10">
+    <svg class="spinner w-10 h-10 text-coffee-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    <p class="text-coffee-600 font-medium">Buscando pedido...</p>
+  </div>
+
+  <!-- Error de búsqueda -->
+  <div id="scan-error" class="hidden bg-red-50 border-2 border-red-200 rounded-2xl p-5 text-center">
+    <p class="text-4xl mb-2">⚠️</p>
+    <p id="scan-error-msg" class="font-bold text-red-700 text-lg"></p>
+    <p class="text-sm text-red-500 mt-1">Verifica el ID e intenta de nuevo</p>
+  </div>
+
+  <!-- Tarjeta de pedido escaneado -->
+  <div id="scan-result" class="hidden animate-slide-in bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-coffee-200">
+    <!-- Header del pedido -->
+    <div class="bg-coffee-900 text-white p-5">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-coffee-200 text-sm font-medium">Pedido verificado</p>
+          <p id="result-id" class="text-3xl font-bold tracking-wide"></p>
+        </div>
+        <div id="result-source-badge" class="flex flex-col items-center gap-1"></div>
+      </div>
+    </div>
+
+    <!-- Datos del destinatario -->
+    <div class="p-5 border-b border-coffee-100">
+      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-3">Destinatario</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <p class="text-xs text-coffee-400">Nombre</p>
+          <p id="result-name" class="font-bold text-lg leading-tight"></p>
+        </div>
+        <div>
+          <p class="text-xs text-coffee-400">Teléfono</p>
+          <p id="result-phone" class="font-semibold text-lg"></p>
+        </div>
+        <div class="col-span-2">
+          <p class="text-xs text-coffee-400">Dirección</p>
+          <p id="result-address" class="font-semibold"></p>
+        </div>
+        <div>
+          <p class="text-xs text-coffee-400">Ciudad</p>
+          <p id="result-city" class="font-semibold"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ítemes del pedido -->
+    <div class="p-5 border-b border-coffee-100">
+      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-3">
+        Ítemes a Despachar
+      </h3>
+      <div id="result-items" class="space-y-2"></div>
+    </div>
+
+    <!-- Nota del cliente -->
+    <div id="result-note-section" class="hidden px-5 pb-3 pt-0">
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+        <p class="text-xs font-bold text-amber-700 mb-1">Nota del cliente</p>
+        <p id="result-note" class="text-sm text-amber-800"></p>
+      </div>
+    </div>
+
+    <!-- Acción de etiqueta -->
+    <div class="p-5 bg-coffee-50">
+      <button id="label-btn" onclick="printLabel()"
+        class="w-full bg-green-600 hover:bg-green-700 active:scale-95 text-white font-bold text-xl py-5 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+        </svg>
+        Confirmar y Etiquetar
+      </button>
+
+      <!-- Estado de impresión -->
+      <div id="label-loading" class="hidden text-center py-4">
+        <svg class="spinner w-8 h-8 text-coffee-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <p class="text-coffee-600 font-medium">Enviando a impresora...</p>
+      </div>
+
+      <!-- Error de impresión con detalles -->
+      <div id="label-error" class="hidden mt-3 bg-red-50 border border-red-200 rounded-xl p-4">
+        <p class="font-bold text-red-700">❌ Error de impresión</p>
+        <p id="label-error-msg" class="text-sm text-red-600 mt-1"></p>
+        <button onclick="printLabel()" class="mt-3 w-full bg-red-600 text-white py-2.5 rounded-lg font-semibold hover:bg-red-700 transition-all">
+          🔄 Reintentar
+        </button>
+      </div>
+
+      <!-- Éxito -->
+      <div id="label-success" class="hidden mt-3 bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+        <p class="text-4xl mb-1">✅</p>
+        <p class="font-bold text-green-700 text-lg">Etiqueta impresa con éxito</p>
+        <p class="text-sm text-green-600 mt-0.5">Pedido marcado como completado</p>
+        <button onclick="resetScanner()" class="mt-3 w-full bg-coffee-900 text-white py-3 rounded-xl font-bold hover:bg-coffee-800 transition-all">
+          Escanear siguiente pedido
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT — Lógica de la SPA
+══════════════════════════════════════════════════════════════════ -->
+<script>
+  // ── Estado global ──────────────────────────────────────────────
+  let currentOrder = null;
+  let activeView   = 'dashboard';
+  const DEFAULT_SOURCE = 'woocommerce';
+
+  // ── Iconos por fuente (preparado para más plataformas) ─────────
+  const SOURCE_ICONS = {
+    woocommerce: {
+      icon: `<svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+               <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18c-4.418 0-8-3.582-8-8s3.582-8 8-8 8 3.582 8 8-3.582 8-8 8zm-1-5h2v2h-2zm0-8h2v6h-2z"/>
+             </svg>`,
+      label: 'WooCommerce',
+      color: 'text-purple-300 bg-purple-800',
+    },
+    mercadolibre: {
+      icon: `<svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+               <circle cx="12" cy="12" r="10"/>
+             </svg>`,
+      label: 'Mercado Libre',
+      color: 'text-yellow-300 bg-yellow-700',
+    },
+    manual: {
+      icon: `<span class="text-2xl">📝</span>`,
+      label: 'Manual',
+      color: 'text-gray-300 bg-gray-700',
+    },
+  };
+
+  // ── Utilidades generales ───────────────────────────────────────
+  function toast(msg, type = 'info') {
+    const colors = {
+      success: 'bg-green-600 text-white',
+      error:   'bg-red-600 text-white',
+      info:    'bg-coffee-900 text-white',
+      warn:    'bg-amber-500 text-white',
+    };
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto max-w-xs px-4 py-3 rounded-xl shadow-lg text-sm font-medium
+                    ${colors[type] || colors.info} animate-slide-in`;
+    el.textContent = msg;
+    const container = document.getElementById('toast-container');
+    container.appendChild(el);
+    setTimeout(() => el.classList.add('opacity-0', 'transition-opacity', 'duration-500'), 3000);
+    setTimeout(() => el.remove(), 3600);
+  }
+
+  function showView(view) {
+    activeView = view;
+    document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
+    document.getElementById('view-scanner').classList.toggle('hidden', view !== 'scanner');
+
+    document.getElementById('tab-dashboard').className =
+      view === 'dashboard'
+        ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
+        : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
+
+    document.getElementById('tab-scanner').className =
+      view === 'scanner'
+        ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
+        : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
+
+    if (view === 'scanner') {
+      // Autofocus constante en el input de escaneo
+      setTimeout(() => document.getElementById('scan-input').focus(), 100);
+    }
+  }
+
+  function sourceInfo(source) {
+    return SOURCE_ICONS[source] || SOURCE_ICONS['manual'];
+  }
+
+  // ── Diagnóstico de impresora ───────────────────────────────────
+  async function pingPrinter() {
+    try {
+      const r = await fetch('/api/printer/test');
+      const d = await r.json();
+      const dot   = document.getElementById('printer-dot');
+      const label = document.getElementById('printer-label');
+      if (d.reachable) {
+        dot.className   = 'w-2.5 h-2.5 rounded-full bg-green-400';
+        label.textContent = 'Impresora OK';
+      } else {
+        dot.className   = 'w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse';
+        label.textContent = 'Sin impresora';
+      }
+    } catch {
+      document.getElementById('printer-dot').className = 'w-2.5 h-2.5 rounded-full bg-gray-500';
+    }
+  }
+
+  // ── Dashboard — carga de pedidos ───────────────────────────────
+  async function loadOrders() {
+    const grid    = document.getElementById('orders-grid');
+    const loading = document.getElementById('orders-loading');
+    const empty   = document.getElementById('empty-state');
+    const icon    = document.getElementById('refresh-icon');
+    const count   = document.getElementById('order-count');
+    const errBox  = document.getElementById('api-errors');
+
+    grid.classList.add('hidden');
+    empty.classList.add('hidden');
+    errBox.classList.add('hidden');
+    loading.classList.remove('hidden');
+    icon.classList.add('spinner');
+
+    try {
+      const r = await fetch('/api/orders');
+      const d = await r.json();
+
+      loading.classList.add('hidden');
+      icon.classList.remove('spinner');
+
+      // Mostrar errores de proveedores si los hay
+      if (d.errors && d.errors.length > 0) {
+        errBox.innerHTML = d.errors.map(e => `
+          <div class="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-800 mb-2">
+            <span>⚠️</span>
+            <strong>${e.source}:</strong> ${e.error}
+          </div>`).join('');
+        errBox.classList.remove('hidden');
+      }
+
+      const orders = d.orders || [];
+      count.textContent = orders.length;
+
+      if (orders.length === 0) {
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      grid.innerHTML = orders.map(o => buildOrderCard(o)).join('');
+      grid.classList.remove('hidden');
+
+    } catch (err) {
+      loading.classList.add('hidden');
+      icon.classList.remove('spinner');
+      count.textContent = '—';
+      toast('Error de conexión al servidor', 'error');
+    }
+  }
+
+  function buildOrderCard(order) {
+    const src  = sourceInfo(order.source);
+    const ship = order.shipping || {};
+    const name = [ship.first_name, ship.last_name].filter(Boolean).join(' ') || 'Sin nombre';
+    const city = ship.city || '—';
+    const itemCount = (order.items || []).reduce((acc, i) => acc + i.quantity, 0);
+    const total = new Intl.NumberFormat('es-CL', { style: 'currency', currency: order.currency || 'CLP' })
+                         .format(order.total || 0);
+    const dateStr = order.created_at
+      ? new Date(order.created_at).toLocaleString('es-CL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : '';
+
+    const statusBadge = orderStatusBadge(order.status);
+
+    return `
+    <div class="bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow border border-coffee-100 overflow-hidden">
+      <!-- Tira de color por fuente -->
+      <div class="h-1.5 ${order.source === 'woocommerce' ? 'bg-purple-500' : order.source === 'mercadolibre' ? 'bg-yellow-400' : 'bg-gray-400'}"></div>
+
+      <div class="p-5">
+        <!-- Header -->
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs px-2 py-0.5 rounded-full font-bold ${src.color}">${src.label}</span>
+            ${statusBadge}
+          </div>
+          <span class="text-xs text-coffee-400">${dateStr}</span>
+        </div>
+
+        <!-- Número de pedido -->
+        <p class="text-2xl font-black text-coffee-900 mb-3 tracking-tight">#${order.id}</p>
+
+        <!-- Datos cliente -->
+        <div class="space-y-1 mb-4">
+          <div class="flex items-center gap-2 text-sm">
+            <svg class="w-4 h-4 text-coffee-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+            <span class="font-semibold text-coffee-800 truncate">${name}</span>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <svg class="w-4 h-4 text-coffee-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span class="text-coffee-600 truncate">${city}</span>
+          </div>
+        </div>
+
+        <!-- Resumen de ítemes y total -->
+        <div class="flex items-center justify-between text-sm mb-4 py-2.5 px-3 bg-coffee-50 rounded-xl">
+          <span class="text-coffee-600">${itemCount} unidad${itemCount !== 1 ? 'es' : ''} · ${(order.items || []).length} producto${(order.items || []).length !== 1 ? 's' : ''}</span>
+          <span class="font-bold text-coffee-900">${total}</span>
+        </div>
+
+        <!-- Botón Preparar -->
+        <button
+          onclick="prepareOrder('${order.id}', '${order.source}')"
+          data-id="${order.id}"
+          class="prepare-btn w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          Preparar pedido
+        </button>
+      </div>
+    </div>`;
+  }
+
+  function orderStatusBadge(status) {
+    const map = {
+      processing:  'bg-blue-100 text-blue-700',
+      preparing:   'bg-amber-100 text-amber-700',
+      labeled:     'bg-indigo-100 text-indigo-700',
+      completed:   'bg-green-100 text-green-700',
+      error:       'bg-red-100 text-red-700',
+    };
+    const labels = {
+      processing: 'En Cola',
+      preparing:  'En Preparación',
+      labeled:    'Etiquetado',
+      completed:  'Completado',
+      error:      'Error',
+    };
+    const cls = map[status] || 'bg-gray-100 text-gray-700';
+    return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cls}">${labels[status] || status}</span>`;
+  }
+
+  // ── Dashboard — preparar pedido (genera PDF) ───────────────────
+  async function prepareOrder(orderId, source) {
+    const btn = document.querySelector(`[data-id="${orderId}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<svg class="spinner w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg> Generando PDF...`;
+    }
+
+    try {
+      const r = await fetch(`/api/orders/${orderId}/prepare?source=${source}`, { method: 'POST' });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        toast(`Error: ${err.detail || r.statusText}`, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Preparar pedido'; }
+        return;
+      }
+
+      // Abrir PDF en nueva pestaña
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+
+      toast(`Pedido #${orderId} en preparación`, 'success');
+
+      // Refrescar lista después de un momento
+      setTimeout(loadOrders, 1200);
+
+    } catch (err) {
+      toast('Error de conexión', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Preparar pedido'; }
+    }
+  }
+
+  // ── Escáner — búsqueda de pedido ──────────────────────────────
+  function handleScanInput(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchOrder();
+    }
+  }
+
+  async function searchOrder() {
+    const input = document.getElementById('scan-input');
+    const id    = input.value.trim().replace(/^#/, '');
+    if (!id) {
+      input.focus();
+      return;
+    }
+
+    // Resetear estados
+    document.getElementById('scan-result').classList.add('hidden');
+    document.getElementById('scan-error').classList.add('hidden');
+    document.getElementById('scan-loading').classList.remove('hidden');
+    currentOrder = null;
+
+    try {
+      // Intentar con todos los proveedores configurados
+      // En esta versión: woocommerce por defecto
+      const r = await fetch(`/api/orders/${id}?source=${DEFAULT_SOURCE}`);
+
+      document.getElementById('scan-loading').classList.add('hidden');
+
+      if (r.status === 404) {
+        document.getElementById('scan-error-msg').textContent = `Pedido #${id} no encontrado`;
+        document.getElementById('scan-error').classList.remove('hidden');
+        input.select();
+        return;
+      }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        document.getElementById('scan-error-msg').textContent = err.detail || 'Error al buscar el pedido';
+        document.getElementById('scan-error').classList.remove('hidden');
+        input.select();
+        return;
+      }
+
+      const order = await r.json();
+      currentOrder = order;
+      renderScanResult(order);
+
+    } catch (err) {
+      document.getElementById('scan-loading').classList.add('hidden');
+      document.getElementById('scan-error-msg').textContent = 'Error de conexión al servidor';
+      document.getElementById('scan-error').classList.remove('hidden');
+    }
+  }
+
+  function renderScanResult(order) {
+    const ship = order.shipping || {};
+    const name = [ship.first_name, ship.last_name].filter(Boolean).join(' ') || '—';
+    const addr = [ship.address_1, ship.address_2].filter(Boolean).join(', ') || '—';
+
+    document.getElementById('result-id').textContent      = `#${order.id}`;
+    document.getElementById('result-name').textContent    = name;
+    document.getElementById('result-phone').textContent   = ship.phone || '—';
+    document.getElementById('result-address').textContent = addr;
+    document.getElementById('result-city').textContent    = ship.city || '—';
+
+    // Badge de fuente
+    const src = sourceInfo(order.source);
+    document.getElementById('result-source-badge').innerHTML = `
+      <div class="flex flex-col items-center gap-1 ${src.color} rounded-xl p-2">
+        ${src.icon}
+        <span class="text-xs font-bold">${src.label}</span>
+      </div>`;
+
+    // Ítemes
+    const itemsHtml = (order.items || []).map(item => `
+      <div class="flex items-center justify-between py-2.5 px-3 bg-coffee-50 rounded-xl">
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-coffee-900 truncate">${item.name}</p>
+          <p class="text-xs text-coffee-400 font-mono">${item.sku}</p>
+        </div>
+        <div class="ml-3 flex-shrink-0">
+          <span class="bg-coffee-900 text-white text-lg font-black w-10 h-10 rounded-full flex items-center justify-center">
+            ${item.quantity}
+          </span>
+        </div>
+      </div>`).join('');
+    document.getElementById('result-items').innerHTML = itemsHtml || '<p class="text-coffee-400 text-sm">Sin ítemes</p>';
+
+    // Nota del cliente
+    const noteSection = document.getElementById('result-note-section');
+    if (order.customer_note) {
+      document.getElementById('result-note').textContent = order.customer_note;
+      noteSection.classList.remove('hidden');
+    } else {
+      noteSection.classList.add('hidden');
+    }
+
+    // Resetear botón de etiqueta
+    document.getElementById('label-btn').classList.remove('hidden');
+    document.getElementById('label-loading').classList.add('hidden');
+    document.getElementById('label-error').classList.add('hidden');
+    document.getElementById('label-success').classList.add('hidden');
+
+    document.getElementById('scan-result').classList.remove('hidden');
+  }
+
+  // ── Escáner — impresión de etiqueta ───────────────────────────
+  async function printLabel() {
+    if (!currentOrder) return;
+
+    document.getElementById('label-btn').classList.add('hidden');
+    document.getElementById('label-loading').classList.remove('hidden');
+    document.getElementById('label-error').classList.add('hidden');
+    document.getElementById('label-success').classList.add('hidden');
+
+    const { id, source } = currentOrder;
+
+    try {
+      const r = await fetch(`/api/orders/${id}/label?source=${source || DEFAULT_SOURCE}`, {
+        method: 'POST'
+      });
+
+      document.getElementById('label-loading').classList.add('hidden');
+
+      const body = await r.json().catch(() => ({}));
+
+      if (!r.ok) {
+        const detail = body.detail || {};
+        const msg = typeof detail === 'string'
+          ? detail
+          : `${detail.message || 'Error'} — ${detail.reason || ''} (${detail.printer || ''})`;
+
+        document.getElementById('label-error-msg').textContent = msg;
+        document.getElementById('label-error').classList.remove('hidden');
+        toast('Error de impresión — verificar impresora', 'error');
+        return;
+      }
+
+      // Éxito
+      document.getElementById('label-success').classList.remove('hidden');
+      toast(`Pedido #${id} completado ✅`, 'success');
+      currentOrder = null;
+
+      // Refrescar dashboard en background
+      if (activeView === 'dashboard') loadOrders();
+
+    } catch (err) {
+      document.getElementById('label-loading').classList.add('hidden');
+      document.getElementById('label-error-msg').textContent = 'Error de conexión al servidor';
+      document.getElementById('label-error').classList.remove('hidden');
+    }
+  }
+
+  // Restablecer escáner para el siguiente pedido
+  function resetScanner() {
+    currentOrder = null;
+    document.getElementById('scan-input').value = '';
+    document.getElementById('scan-result').classList.add('hidden');
+    document.getElementById('scan-error').classList.add('hidden');
+    document.getElementById('scan-input').focus();
+  }
+
+  // Mantener autofocus en el input cuando la vista está activa
+  document.addEventListener('click', (e) => {
+    if (activeView === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
+      document.getElementById('scan-input').focus();
+    }
+  });
+
+  // ── Inicialización ────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    loadOrders();
+    pingPrinter();
+    // Re-verificar impresora cada 30 segundos
+    setInterval(pingPrinter, 30_000);
+    // Auto-refrescar pedidos cada 60 segundos
+    setInterval(() => { if (activeView === 'dashboard') loadOrders(); }, 60_000);
+  });
+</script>
+</body>
+</html>
