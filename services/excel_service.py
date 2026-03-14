@@ -10,6 +10,7 @@ Reglas de negocio:
 from __future__ import annotations
 
 import json
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 from typing import List
@@ -39,15 +40,21 @@ _RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _normalize_text(text: str) -> str:
+    """Quita diacríticos/acentos y convierte a minúsculas para comparación robusta."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
+
 def _load_rm_comunas() -> frozenset[str]:
-    """Devuelve el set de comunas RM en minúsculas para comparación rápida."""
+    """Devuelve el set de comunas RM normalizadas (sin tildes, minúsculas)."""
     with open(_RM_JSON_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    return frozenset(c.strip().lower() for c in data.get("comunas", []))
+    return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
 def _get_courier(ciudad: str, rm_comunas: frozenset[str]) -> str:
-    return "Rocket" if ciudad.strip().lower() in rm_comunas else "Chilexpress"
+    return "Rocket" if _normalize_text(ciudad.strip()) in rm_comunas else "Chilexpress"
 
 
 def _qty_chocolate(order: NormalizedOrder) -> int:

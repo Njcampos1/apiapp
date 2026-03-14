@@ -32,8 +32,8 @@ WOO_STATUS_MAP = {
     "processing": OrderStatus.PROCESSING,
     "on-hold":    OrderStatus.PROCESSING,
     "completed":  OrderStatus.COMPLETED,
-    "cancelled":  OrderStatus.COMPLETED,
-    "refunded":   OrderStatus.COMPLETED,
+    "cancelled":  OrderStatus.ERROR,
+    "refunded":   OrderStatus.ERROR,
     "failed":     OrderStatus.ERROR,
     "trash":      OrderStatus.ERROR,
 }
@@ -63,32 +63,44 @@ class WooCommerceProvider(BaseOrderProvider):
     # ── API interna ──────────────────────────────────────────────
 
     async def get_pending_orders(self) -> List[NormalizedOrder]:
-        """Obtiene pedidos en estado 'processing' de WooCommerce."""
-        try:
-            resp = await self._client.get(
-                f"{self._base}/orders",
-                params={
-                    "status":   "processing",
-                    "per_page": 50,
-                    "orderby":  "date",
-                    "order":    "asc",
-                },
-            )
-            resp.raise_for_status()
-        except httpx.TimeoutException:
-            logger.error("WooCommerce: timeout al obtener pedidos")
-            raise RuntimeError("WooCommerce no respondió a tiempo")
-        except httpx.HTTPStatusError as e:
-            logger.error("WooCommerce HTTP %s: %s", e.response.status_code, e.response.text)
-            raise RuntimeError(f"WooCommerce error HTTP {e.response.status_code}")
-
-        orders = resp.json()
+        """Obtiene pedidos en estado 'processing' de WooCommerce (todas las páginas)."""
         normalized = []
-        for raw in orders:
+        page = 1
+        per_page = 50
+
+        while True:
             try:
-                normalized.append(self.normalize(raw))
-            except Exception as exc:
-                logger.warning("No se pudo normalizar pedido %s: %s", raw.get("id"), exc)
+                resp = await self._client.get(
+                    f"{self._base}/orders",
+                    params={
+                        "status":   "processing",
+                        "per_page": per_page,
+                        "page":     page,
+                        "orderby":  "date",
+                        "order":    "asc",
+                        "after":    "2026-01-01T00:00:00Z",
+                    },
+                )
+                resp.raise_for_status()
+            except httpx.TimeoutException:
+                logger.error("WooCommerce: timeout al obtener pedidos (página %d)", page)
+                raise RuntimeError("WooCommerce no respondió a tiempo")
+            except httpx.HTTPStatusError as e:
+                logger.error("WooCommerce HTTP %s: %s", e.response.status_code, e.response.text)
+                raise RuntimeError(f"WooCommerce error HTTP {e.response.status_code}")
+
+            orders = resp.json()
+            for raw in orders:
+                try:
+                    normalized.append(self.normalize(raw))
+                except Exception as exc:
+                    logger.warning("No se pudo normalizar pedido %s: %s", raw.get("id"), exc)
+
+            if len(orders) < per_page:
+                break
+            page += 1
+
+        logger.debug("WooCommerce: %d pedidos obtenidos en %d página(s)", len(normalized), page)
         return normalized
 
     async def get_order(self, order_id: str) -> Optional[NormalizedOrder]:
@@ -106,7 +118,7 @@ class WooCommerceProvider(BaseOrderProvider):
             raise RuntimeError(f"Error HTTP {e.response.status_code}")
 
     async def update_order_status(
-        self, order_id: str, status: OrderStatus, note: str = ""
+        self, order_id: str, status: OrderStatus
     ) -> bool:
         woo_status = INTERNAL_TO_WOO.get(status)
         if woo_status is None:
@@ -114,8 +126,6 @@ class WooCommerceProvider(BaseOrderProvider):
             return False
 
         payload: dict = {"status": woo_status}
-        if note:
-            payload["customer_note"] = note
 
         try:
             resp = await self._client.put(

@@ -34,7 +34,7 @@ class BaseOrderProvider(ABC):
 
     @abstractmethod
     async def update_order_status(
-        self, order_id: str, status: OrderStatus, note: str = ""
+        self, order_id: str, status: OrderStatus
     ) -> bool:
         """
         Actualiza el estado del pedido en la plataforma remota.

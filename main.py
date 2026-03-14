@@ -369,7 +369,6 @@ async def set_order_status(
     if internal_status == OrderStatus.COMPLETED:
         remote_synced = await provider.update_order_status(
             order_id, OrderStatus.COMPLETED,
-            note="Pedido completado manualmente desde bodega.",
         )
         await log_event(
             order_id, source,
@@ -505,7 +504,6 @@ async def print_label(
     complete_ok = await provider.update_order_status(
         order_id,
         OrderStatus.COMPLETED,
-        note="Pedido preparado y etiquetado por bodega.",
     )
 
     await log_event(

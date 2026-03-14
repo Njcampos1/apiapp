@@ -104,6 +104,14 @@
         </svg>
         Descargar todos (PDF)
       </button>
+      <button onclick="exportExcel()" id="export-excel-btn"
+        class="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-emerald-700 active:scale-95 transition-all shadow">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Descargar Excel
+      </button>
       <button onclick="loadOrders()" id="refresh-btn"
         class="flex items-center gap-2 bg-coffee-900 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-800 active:scale-95 transition-all shadow">
         <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -520,8 +528,51 @@
     }
   }
 
-  function buildOrderCard(order) {
-    const src  = sourceInfo(order.source);
+  // ── Dashboard — descarga Excel ─────────────────────────────────
+  async function exportExcel() {
+    const btn = document.getElementById('export-excel-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg> Generando...`;
+
+    try {
+      const r = await fetch('/api/orders/export-excel');
+
+      if (r.status === 404) {
+        toast('No hay pedidos completados para exportar', 'info');
+        return;
+      }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        toast(`Error: ${err.detail || r.statusText}`, 'error');
+        return;
+      }
+
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `reporte_pedidos.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      const count = r.headers.get('X-Orders-Count') || '?';
+      toast(`Excel descargado (${count} pedidos completados)`, 'success');
+
+    } catch (err) {
+      toast('Error de conexión', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg> Descargar Excel`;
+    }
+  }
+
+  function buildOrderCard(order) {    const src  = sourceInfo(order.source);
     const ship = order.shipping || {};
     const name = [ship.first_name, ship.last_name].filter(Boolean).join(' ') || 'Sin nombre';
     const city = ship.city || '—';
@@ -707,13 +758,13 @@
 
     // Ítemes
     const itemsHtml = (order.items || []).map(item => `
-      <div class="flex items-center justify-between py-2.5 px-3 bg-coffee-50 rounded-xl">
+      <div class="flex items-center justify-between py-1.5 px-3 bg-coffee-50 rounded-xl">
         <div class="flex-1 min-w-0">
-          <p class="font-semibold text-coffee-900 truncate">${item.name}</p>
+          <p class="text-sm font-semibold text-coffee-900 truncate">${item.name}</p>
           <p class="text-xs text-coffee-400 font-mono">${item.sku}</p>
         </div>
         <div class="ml-3 flex-shrink-0">
-          <span class="bg-coffee-900 text-white text-lg font-black w-10 h-10 rounded-full flex items-center justify-center">
+          <span class="bg-coffee-900 text-white text-sm font-black w-7 h-7 rounded-full flex items-center justify-center">
             ${item.quantity}
           </span>
         </div>
