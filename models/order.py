@@ -67,6 +67,7 @@ class NormalizedOrder(BaseModel):
     currency:         str = "CLP"
     created_at:       datetime = Field(default_factory=datetime.utcnow)
     updated_at:       datetime = Field(default_factory=datetime.utcnow)
+    completed_at:     Optional[datetime] = None
     # Metadatos opacos para round-trip a la plataforma original
     platform_meta:    Dict[str, Any] = Field(default_factory=dict)
 

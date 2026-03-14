@@ -32,6 +32,10 @@ WOO_STATUS_MAP = {
     "processing": OrderStatus.PROCESSING,
     "on-hold":    OrderStatus.PROCESSING,
     "completed":  OrderStatus.COMPLETED,
+    "cancelled":  OrderStatus.COMPLETED,
+    "refunded":   OrderStatus.COMPLETED,
+    "failed":     OrderStatus.ERROR,
+    "trash":      OrderStatus.ERROR,
 }
 
 # Estados internos → estados WooCommerce

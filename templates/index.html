@@ -29,7 +29,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    /* Animaciones y estilos extras no disponibles en Tailwind puro */
     @keyframes pulse-ring { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.05);opacity:.9} }
     @keyframes slide-in   { from{transform:translateY(-12px);opacity:0} to{transform:translateY(0);opacity:1} }
     @keyframes spin-slow  { to{transform:rotate(360deg)} }
@@ -37,7 +36,6 @@
     .animate-slide-in   { animation: slide-in .25s ease-out; }
     .spinner { animation: spin-slow .8s linear infinite; }
 
-    /* Input de escaneo centrado y llamativo */
     #scan-input {
       caret-color: #c8a96e;
       font-size: 1.5rem;
@@ -45,7 +43,6 @@
     }
     #scan-input:focus { outline: none; box-shadow: 0 0 0 4px rgba(200,169,110,.35); }
 
-    /* Scrollbar custom */
     ::-webkit-scrollbar { width:6px; }
     ::-webkit-scrollbar-track { background:#f1f1f1; }
     ::-webkit-scrollbar-thumb { background:#c8a96e; border-radius:3px; }
@@ -54,12 +51,8 @@
 
 <body class="h-full bg-coffee-100 font-sans text-coffee-900">
 
-<!-- ═══════════════════════════════════════════════════════════════
-     ENCABEZADO GLOBAL
-══════════════════════════════════════════════════════════════════ -->
 <header class="bg-coffee-900 text-white shadow-xl sticky top-0 z-50">
   <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-    <!-- Logo + título -->
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 bg-coffee-400 rounded-full flex items-center justify-center flex-shrink-0">
         <svg class="w-6 h-6 text-coffee-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -73,7 +66,6 @@
       </div>
     </div>
 
-    <!-- Navegación de vistas -->
     <nav class="flex gap-2">
       <button onclick="showView('dashboard')" id="tab-dashboard"
         class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900">
@@ -85,7 +77,6 @@
       </button>
     </nav>
 
-    <!-- Indicador de impresora -->
     <div class="flex items-center gap-2 text-xs text-coffee-200">
       <div id="printer-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500" title="Estado impresora"></div>
       <span id="printer-label">Impresora</span>
@@ -93,45 +84,44 @@
   </div>
 </header>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     TOAST DE NOTIFICACIONES
-══════════════════════════════════════════════════════════════════ -->
 <div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     VISTA 1: DASHBOARD
-══════════════════════════════════════════════════════════════════ -->
+<!-- ── Dashboard ──────────────────────────────────────────────── -->
 <section id="view-dashboard" class="max-w-7xl mx-auto px-4 py-6">
-
-  <!-- Barra de acciones -->
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex items-center justify-between mb-6 gap-3 flex-wrap">
     <div>
       <h1 class="text-2xl font-bold">Pedidos en Cola</h1>
       <p class="text-sm text-coffee-600 mt-0.5">
         <span id="order-count">—</span> pedidos listos para preparar
       </p>
     </div>
-    <button onclick="loadOrders()" id="refresh-btn"
-      class="flex items-center gap-2 bg-coffee-900 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-800 active:scale-95 transition-all shadow">
-      <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-      </svg>
-      Actualizar
-    </button>
+    <div class="flex items-center gap-2">
+      <button onclick="exportAllOrders()" id="export-all-btn"
+        class="flex items-center gap-2 bg-coffee-400 text-coffee-900 px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-200 active:scale-95 transition-all shadow">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        Descargar todos (PDF)
+      </button>
+      <button onclick="loadOrders()" id="refresh-btn"
+        class="flex items-center gap-2 bg-coffee-900 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-800 active:scale-95 transition-all shadow">
+        <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Actualizar
+      </button>
+    </div>
   </div>
 
-  <!-- Mensajes de error de API -->
   <div id="api-errors" class="hidden mb-4"></div>
-
-  <!-- Estado vacío -->
   <div id="empty-state" class="hidden text-center py-20">
     <div class="text-7xl mb-4">✅</div>
     <p class="text-xl font-semibold text-coffee-600">No hay pedidos pendientes</p>
     <p class="text-sm text-coffee-400 mt-1">Todos los pedidos han sido procesados</p>
   </div>
 
-  <!-- Tabla de pedidos -->
   <div id="orders-loading" class="text-center py-20">
     <svg class="spinner w-10 h-10 text-coffee-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -143,12 +133,8 @@
   <div id="orders-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 hidden"></div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     VISTA 2: VERIFICACIÓN POR ESCÁNER RF
-══════════════════════════════════════════════════════════════════ -->
+<!-- ── Verificar ───────────────────────────────────────────────── -->
 <section id="view-scanner" class="hidden max-w-3xl mx-auto px-4 py-6">
-
-  <!-- Panel de escaneo -->
   <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 border-2 border-coffee-200">
     <div class="flex items-center gap-3 mb-4">
       <div class="w-12 h-12 bg-coffee-100 rounded-full flex items-center justify-center animate-pulse-ring">
@@ -159,7 +145,7 @@
       </div>
       <div>
         <h2 class="text-xl font-bold">Verificación de Pedido</h2>
-        <p class="text-sm text-coffee-600">Escanea el QR del papel de picking o ingresa el ID manualmente</p>
+        <p class="text-sm text-coffee-600">Escanea el código de barras del picking o ingresa el ID manualmente</p>
       </div>
     </div>
 
@@ -185,7 +171,6 @@
     </p>
   </div>
 
-  <!-- Spinner de búsqueda -->
   <div id="scan-loading" class="hidden text-center py-10">
     <svg class="spinner w-10 h-10 text-coffee-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -194,20 +179,22 @@
     <p class="text-coffee-600 font-medium">Buscando pedido...</p>
   </div>
 
-  <!-- Error de búsqueda -->
   <div id="scan-error" class="hidden bg-red-50 border-2 border-red-200 rounded-2xl p-5 text-center">
     <p class="text-4xl mb-2">⚠️</p>
     <p id="scan-error-msg" class="font-bold text-red-700 text-lg"></p>
     <p class="text-sm text-red-500 mt-1">Verifica el ID e intenta de nuevo</p>
   </div>
 
-  <!-- Tarjeta de pedido escaneado -->
   <div id="scan-result" class="hidden animate-slide-in bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-coffee-200">
-    <!-- Header del pedido -->
+
+    <!-- Header con ID, fuente y estado -->
     <div class="bg-coffee-900 text-white p-5">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-coffee-200 text-sm font-medium">Pedido verificado</p>
+          <div class="flex items-center gap-2 mb-1">
+            <p class="text-coffee-200 text-sm font-medium">Pedido verificado</p>
+            <span id="result-status-badge"></span>
+          </div>
           <p id="result-id" class="text-3xl font-bold tracking-wide"></p>
         </div>
         <div id="result-source-badge" class="flex flex-col items-center gap-1"></div>
@@ -237,7 +224,7 @@
       </div>
     </div>
 
-    <!-- Ítemes del pedido -->
+    <!-- Ítemes -->
     <div class="p-5 border-b border-coffee-100">
       <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-3">
         Ítemes a Despachar
@@ -253,8 +240,44 @@
       </div>
     </div>
 
-    <!-- Acción de etiqueta -->
-    <div class="p-5 bg-coffee-50">
+    <!-- Acciones -->
+    <div class="p-5 bg-coffee-50 space-y-3">
+
+      <!-- Botones secundarios: descargas -->
+      <div class="flex gap-2">
+        <button onclick="downloadPickingPdf()"
+          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2.5 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          Picking PDF
+        </button>
+        <button id="zpl-download-btn" onclick="downloadZpl()"
+          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2.5 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+          </svg>
+          Descargar ZPL
+        </button>
+      </div>
+
+      <!-- Confirmación manual (aparece tras descargar ZPL) -->
+      <div id="zpl-confirm-section" class="hidden bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
+        <p class="text-sm font-semibold text-amber-800 mb-2">
+          ¿Imprimiste el archivo ZPL con la utilidad Zebra?
+        </p>
+        <button onclick="setStatus('completed')"
+          class="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold py-3 rounded-xl transition-all shadow flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          Confirmar entrega manual
+        </button>
+      </div>
+
+      <!-- Botón principal: imprimir en impresora -->
       <button id="label-btn" onclick="printLabel()"
         class="w-full bg-green-600 hover:bg-green-700 active:scale-95 text-white font-bold text-xl py-5 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3">
         <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -264,7 +287,7 @@
         Confirmar y Etiquetar
       </button>
 
-      <!-- Estado de impresión -->
+      <!-- Spinner de impresión -->
       <div id="label-loading" class="hidden text-center py-4">
         <svg class="spinner w-8 h-8 text-coffee-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -273,8 +296,8 @@
         <p class="text-coffee-600 font-medium">Enviando a impresora...</p>
       </div>
 
-      <!-- Error de impresión con detalles -->
-      <div id="label-error" class="hidden mt-3 bg-red-50 border border-red-200 rounded-xl p-4">
+      <!-- Error de impresión -->
+      <div id="label-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-4">
         <p class="font-bold text-red-700">❌ Error de impresión</p>
         <p id="label-error-msg" class="text-sm text-red-600 mt-1"></p>
         <button onclick="printLabel()" class="mt-3 w-full bg-red-600 text-white py-2.5 rounded-lg font-semibold hover:bg-red-700 transition-all">
@@ -283,7 +306,7 @@
       </div>
 
       <!-- Éxito -->
-      <div id="label-success" class="hidden mt-3 bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+      <div id="label-success" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 text-center">
         <p class="text-4xl mb-1">✅</p>
         <p class="font-bold text-green-700 text-lg">Etiqueta impresa con éxito</p>
         <p class="text-sm text-green-600 mt-0.5">Pedido marcado como completado</p>
@@ -291,20 +314,35 @@
           Escanear siguiente pedido
         </button>
       </div>
+
+      <!-- Cambio manual de estado -->
+      <div class="pt-1">
+        <p class="text-xs text-coffee-400 font-semibold uppercase tracking-widest mb-2">Cambio manual de estado</p>
+        <div class="flex gap-2">
+          <button onclick="setStatus('processing')"
+            class="flex-1 bg-blue-50 border border-blue-200 text-blue-700 font-semibold py-2 rounded-xl text-xs hover:bg-blue-100 active:scale-95 transition-all">
+            🔄 Procesando
+          </button>
+          <button onclick="setStatus('completed')"
+            class="flex-1 bg-green-50 border border-green-200 text-green-700 font-semibold py-2 rounded-xl text-xs hover:bg-green-100 active:scale-95 transition-all">
+            ✅ Completado
+          </button>
+          <button onclick="setStatus('cancelled')"
+            class="flex-1 bg-red-50 border border-red-200 text-red-700 font-semibold py-2 rounded-xl text-xs hover:bg-red-100 active:scale-95 transition-all">
+            ❌ Cancelar
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     JAVASCRIPT — Lógica de la SPA
-══════════════════════════════════════════════════════════════════ -->
 <script>
-  // ── Estado global ──────────────────────────────────────────────
   let currentOrder = null;
   let activeView   = 'dashboard';
   const DEFAULT_SOURCE = 'woocommerce';
 
-  // ── Iconos por fuente (preparado para más plataformas) ─────────
   const SOURCE_ICONS = {
     woocommerce: {
       icon: `<svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
@@ -327,7 +365,6 @@
     },
   };
 
-  // ── Utilidades generales ───────────────────────────────────────
   function toast(msg, type = 'info') {
     const colors = {
       success: 'bg-green-600 text-white',
@@ -361,7 +398,6 @@
         : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
 
     if (view === 'scanner') {
-      // Autofocus constante en el input de escaneo
       setTimeout(() => document.getElementById('scan-input').focus(), 100);
     }
   }
@@ -370,7 +406,7 @@
     return SOURCE_ICONS[source] || SOURCE_ICONS['manual'];
   }
 
-  // ── Diagnóstico de impresora ───────────────────────────────────
+  // ── Impresora — ping de estado ─────────────────────────────────
   async function pingPrinter() {
     try {
       const r = await fetch('/api/printer/test');
@@ -411,7 +447,6 @@
       loading.classList.add('hidden');
       icon.classList.remove('spinner');
 
-      // Mostrar errores de proveedores si los hay
       if (d.errors && d.errors.length > 0) {
         errBox.innerHTML = d.errors.map(e => `
           <div class="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-800 mb-2">
@@ -440,6 +475,51 @@
     }
   }
 
+  // ── Dashboard — descarga masiva PDF ───────────────────────────
+  async function exportAllOrders() {
+    const btn = document.getElementById('export-all-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg> Generando...`;
+
+    try {
+      const r = await fetch('/api/orders/export-all');
+
+      if (r.status === 404) {
+        toast('No hay pedidos nuevos para exportar', 'info');
+        return;
+      }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        toast(`Error: ${err.detail || r.statusText}`, 'error');
+        return;
+      }
+
+      const count = r.headers.get('X-Orders-Count') || '?';
+      const blob  = await r.blob();
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      a.href     = url;
+      a.download = `picking_masivo.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      toast(`PDF masivo descargado (${count} pedidos)`, 'success');
+      setTimeout(loadOrders, 1200);
+
+    } catch (err) {
+      toast('Error de conexión', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg> Descargar todos (PDF)`;
+    }
+  }
+
   function buildOrderCard(order) {
     const src  = sourceInfo(order.source);
     const ship = order.shipping || {};
@@ -456,11 +536,8 @@
 
     return `
     <div class="bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow border border-coffee-100 overflow-hidden">
-      <!-- Tira de color por fuente -->
       <div class="h-1.5 ${order.source === 'woocommerce' ? 'bg-purple-500' : order.source === 'mercadolibre' ? 'bg-yellow-400' : 'bg-gray-400'}"></div>
-
       <div class="p-5">
-        <!-- Header -->
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-2">
             <span class="text-xs px-2 py-0.5 rounded-full font-bold ${src.color}">${src.label}</span>
@@ -468,11 +545,7 @@
           </div>
           <span class="text-xs text-coffee-400">${dateStr}</span>
         </div>
-
-        <!-- Número de pedido -->
         <p class="text-2xl font-black text-coffee-900 mb-3 tracking-tight">#${order.id}</p>
-
-        <!-- Datos cliente -->
         <div class="space-y-1 mb-4">
           <div class="flex items-center gap-2 text-sm">
             <svg class="w-4 h-4 text-coffee-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -488,14 +561,10 @@
             <span class="text-coffee-600 truncate">${city}</span>
           </div>
         </div>
-
-        <!-- Resumen de ítemes y total -->
         <div class="flex items-center justify-between text-sm mb-4 py-2.5 px-3 bg-coffee-50 rounded-xl">
           <span class="text-coffee-600">${itemCount} unidad${itemCount !== 1 ? 'es' : ''} · ${(order.items || []).length} producto${(order.items || []).length !== 1 ? 's' : ''}</span>
           <span class="font-bold text-coffee-900">${total}</span>
         </div>
-
-        <!-- Botón Preparar -->
         <button
           onclick="prepareOrder('${order.id}', '${order.source}')"
           data-id="${order.id}"
@@ -529,7 +598,7 @@
     return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cls}">${labels[status] || status}</span>`;
   }
 
-  // ── Dashboard — preparar pedido (genera PDF) ───────────────────
+  // ── Dashboard — preparar pedido (genera PDF individual) ────────
   async function prepareOrder(orderId, source) {
     const btn = document.querySelector(`[data-id="${orderId}"]`);
     if (btn) {
@@ -550,14 +619,11 @@
         return;
       }
 
-      // Abrir PDF en nueva pestaña
       const blob = await r.blob();
       const url  = URL.createObjectURL(blob);
       window.open(url, '_blank');
 
       toast(`Pedido #${orderId} en preparación`, 'success');
-
-      // Refrescar lista después de un momento
       setTimeout(loadOrders, 1200);
 
     } catch (err) {
@@ -566,7 +632,7 @@
     }
   }
 
-  // ── Escáner — búsqueda de pedido ──────────────────────────────
+  // ── Verificar — búsqueda de pedido ────────────────────────────
   function handleScanInput(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -582,15 +648,12 @@
       return;
     }
 
-    // Resetear estados
     document.getElementById('scan-result').classList.add('hidden');
     document.getElementById('scan-error').classList.add('hidden');
     document.getElementById('scan-loading').classList.remove('hidden');
     currentOrder = null;
 
     try {
-      // Intentar con todos los proveedores configurados
-      // En esta versión: woocommerce por defecto
       const r = await fetch(`/api/orders/${id}?source=${DEFAULT_SOURCE}`);
 
       document.getElementById('scan-loading').classList.add('hidden');
@@ -631,6 +694,9 @@
     document.getElementById('result-address').textContent = addr;
     document.getElementById('result-city').textContent    = ship.city || '—';
 
+    // Badge de estado (desde la BD local, campo 'status' del JSON devuelto)
+    document.getElementById('result-status-badge').innerHTML = orderStatusBadge(order.status);
+
     // Badge de fuente
     const src = sourceInfo(order.source);
     document.getElementById('result-source-badge').innerHTML = `
@@ -663,16 +729,62 @@
       noteSection.classList.add('hidden');
     }
 
-    // Resetear botón de etiqueta
+    // Resetear estados de acciones
     document.getElementById('label-btn').classList.remove('hidden');
     document.getElementById('label-loading').classList.add('hidden');
     document.getElementById('label-error').classList.add('hidden');
     document.getElementById('label-success').classList.add('hidden');
+    document.getElementById('zpl-confirm-section').classList.add('hidden');
 
     document.getElementById('scan-result').classList.remove('hidden');
   }
 
-  // ── Escáner — impresión de etiqueta ───────────────────────────
+  // ── Verificar — descargas ──────────────────────────────────────
+
+  async function downloadPickingPdf() {
+    if (!currentOrder) return;
+    const { id, source } = currentOrder;
+    try {
+      const r = await fetch(`/api/orders/${id}/prepare?source=${source || DEFAULT_SOURCE}`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        toast(`Error: ${err.detail || r.statusText}`, 'error');
+        return;
+      }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      toast(`PDF de picking descargado`, 'success');
+    } catch {
+      toast('Error de conexión', 'error');
+    }
+  }
+
+  async function downloadZpl() {
+    if (!currentOrder) return;
+    const { id, source } = currentOrder;
+    try {
+      const r = await fetch(`/api/orders/${id}/zpl?source=${source || DEFAULT_SOURCE}`);
+      if (!r.ok) {
+        toast('Error al generar ZPL', 'error');
+        return;
+      }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `etiqueta_${id}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      // Mostrar sección de confirmación manual
+      document.getElementById('zpl-confirm-section').classList.remove('hidden');
+      toast('ZPL descargado — confirma la impresión manual cuando esté lista', 'info');
+    } catch {
+      toast('Error de conexión', 'error');
+    }
+  }
+
+  // ── Verificar — impresión en Zebra ────────────────────────────
   async function printLabel() {
     if (!currentOrder) return;
 
@@ -700,26 +812,62 @@
 
         document.getElementById('label-error-msg').textContent = msg;
         document.getElementById('label-error').classList.remove('hidden');
-        toast('Error de impresión — verificar impresora', 'error');
+        document.getElementById('label-btn').classList.remove('hidden');
+        toast('Error de impresión — verifica la impresora o usa Descargar ZPL', 'error');
         return;
       }
 
-      // Éxito
       document.getElementById('label-success').classList.remove('hidden');
+      document.getElementById('zpl-confirm-section').classList.add('hidden');
       toast(`Pedido #${id} completado ✅`, 'success');
       currentOrder = null;
 
-      // Refrescar dashboard en background
       if (activeView === 'dashboard') loadOrders();
 
     } catch (err) {
       document.getElementById('label-loading').classList.add('hidden');
       document.getElementById('label-error-msg').textContent = 'Error de conexión al servidor';
       document.getElementById('label-error').classList.remove('hidden');
+      document.getElementById('label-btn').classList.remove('hidden');
     }
   }
 
-  // Restablecer escáner para el siguiente pedido
+  // ── Verificar — cambio manual de estado ───────────────────────
+  async function setStatus(newStatus) {
+    if (!currentOrder) return;
+    const { id, source } = currentOrder;
+    const labels = { processing: 'Procesando', completed: 'Completado', cancelled: 'Cancelado' };
+
+    try {
+      const r = await fetch(
+        `/api/orders/${id}/set-status?source=${source || DEFAULT_SOURCE}&new_status=${newStatus}`,
+        { method: 'POST' }
+      );
+      const body = await r.json().catch(() => ({}));
+
+      if (!r.ok) {
+        toast(`Error: ${body.detail || r.statusText}`, 'error');
+        return;
+      }
+
+      toast(`Pedido #${id} marcado como ${labels[newStatus] || newStatus}`, 'success');
+
+      if (newStatus === 'completed') {
+        document.getElementById('label-btn').classList.add('hidden');
+        document.getElementById('zpl-confirm-section').classList.add('hidden');
+        document.getElementById('label-success').classList.remove('hidden');
+      } else {
+        resetScanner();
+      }
+
+      currentOrder = null;
+      if (activeView === 'dashboard') loadOrders();
+
+    } catch {
+      toast('Error de conexión', 'error');
+    }
+  }
+
   function resetScanner() {
     currentOrder = null;
     document.getElementById('scan-input').value = '';
@@ -728,7 +876,6 @@
     document.getElementById('scan-input').focus();
   }
 
-  // Mantener autofocus en el input cuando la vista está activa
   document.addEventListener('click', (e) => {
     if (activeView === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
       document.getElementById('scan-input').focus();
@@ -739,10 +886,7 @@
   window.addEventListener('DOMContentLoaded', () => {
     loadOrders();
     pingPrinter();
-    // Re-verificar impresora cada 30 segundos
     setInterval(pingPrinter, 30_000);
-    // Auto-refrescar pedidos cada 60 segundos
-    setInterval(() => { if (activeView === 'dashboard') loadOrders(); }, 60_000);
   });
 </script>
 </body>

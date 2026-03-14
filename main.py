@@ -12,7 +12,11 @@ Arquitectura:
 Rutas:
   GET  /                                 → SPA frontend
   GET  /api/orders                       → Pedidos pendientes de todos los proveedores
-  GET  /api/orders/{id}?source=          → Detalle de un pedido
+  GET  /api/orders/export-all            → PDF masivo de pedidos 'processing' + marca PREPARING
+  GET  /api/orders/export-excel          → Reporte Excel de pedidos completados
+  GET  /api/orders/{id}?source=          → Detalle de un pedido (cualquier estado)
+  GET  /api/orders/{id}/zpl?source=         → Descarga etiqueta ZPL como .txt (contingencia)
+  POST /api/orders/{id}/set-status?source=  → Cambia estado manualmente (processing/completed/cancelled)
   POST /api/orders/{id}/prepare?source=  → Inicia preparación + retorna PDF
   POST /api/orders/{id}/label?source=    → Imprime etiqueta ZPL + completa pedido
   GET  /api/printer/test                 → Diagnóstico de conectividad impresora
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Dict, List
 
 import uvicorn
@@ -33,12 +38,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import init_db, upsert_order, log_event
+from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
 from providers.woo_client import WooCommerceProvider
-from services.pdf_service import generate_picking_pdf
-from services.zpl_service import ZPLService
+from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
+from services.excel_service import generate_excel
+from services.zpl_service import ZPLService, build_zpl
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -180,10 +186,13 @@ async def list_orders():
     for source, provider in _providers.items():
         try:
             orders = await provider.get_pending_orders()
-            # Persistir estado local para sobrevivir reinicios
             for o in orders:
+                local_status = await get_local_status(o.id, o.source.value)
+                if local_status and local_status != OrderStatus.PROCESSING:
+                    # Already in preparation or beyond — exclude from queue
+                    continue
                 await upsert_order(o)
-            all_orders.extend([o.model_dump(mode="json") for o in orders])
+                all_orders.append(o.model_dump(mode="json"))
         except Exception as exc:
             logger.error("Error al obtener pedidos de %s: %s", source, exc)
             errors.append({"source": source, "error": str(exc)})
@@ -192,6 +201,187 @@ async def list_orders():
         "orders": all_orders,
         "total":  len(all_orders),
         "errors": errors,
+    }
+
+
+@app.get("/api/orders/export-all", tags=["orders"])
+async def export_all_orders():
+    """
+    Descarga masiva de picking:
+    1. Obtiene todos los pedidos en estado 'processing' de WooCommerce.
+    2. Filtra los que ya están marcados como PREPARING (o superior) en la BD local.
+    3. Genera un único PDF multipágina con la hoja de picking de cada pedido nuevo.
+    4. Actualiza el estado local a PREPARING para que no se repitan en la próxima descarga.
+    """
+    pending: List[NormalizedOrder] = []
+
+    for source, provider in _providers.items():
+        try:
+            orders = await provider.get_pending_orders()
+        except Exception as exc:
+            logger.error("Error al obtener pedidos de %s para export masivo: %s", source, exc)
+            continue
+
+        for o in orders:
+            local_status = await get_local_status(o.id, o.source.value)
+            if local_status and local_status != OrderStatus.PROCESSING:
+                logger.debug(
+                    "Pedido %s ya en estado local '%s', omitido del export masivo",
+                    o.id, local_status,
+                )
+                continue
+            await upsert_order(o)
+            pending.append(o)
+
+    if not pending:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay pedidos nuevos en estado 'processing' para exportar",
+        )
+
+    try:
+        pdf_bytes = generate_bulk_picking_pdf(pending)
+    except Exception as exc:
+        logger.exception("Error generando PDF masivo (%d pedidos)", len(pending))
+        raise HTTPException(status_code=500, detail=f"Error generando PDF masivo: {exc}")
+
+    # Marcar TODOS los pedidos incluidos como PREPARING en BD local
+    for order in pending:
+        order.status = OrderStatus.PREPARING
+        await upsert_order(order)
+        await log_event(
+            order.id, order.source.value,
+            "bulk_export",
+            f"Marcado PREPARING en descarga masiva ({len(pending)} pedidos en el lote)",
+        )
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logger.info("Export masivo completado: %d pedidos → PDF generado", len(pending))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="picking_masivo_{ts}.pdf"',
+            "X-Orders-Count": str(len(pending)),
+        },
+    )
+
+
+@app.get("/api/orders/export-excel", tags=["orders"])
+async def export_excel():
+    """
+    Genera y descarga el reporte Excel de todos los pedidos completados
+    registrados en la base de datos local.
+    """
+    orders = await get_completed_orders()
+
+    if not orders:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay pedidos completados en la base de datos local",
+        )
+
+    try:
+        excel_bytes = generate_excel(orders)
+    except Exception as exc:
+        logger.exception("Error generando reporte Excel")
+        raise HTTPException(status_code=500, detail=f"Error generando Excel: {exc}")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="reporte_pedidos_{ts}.xlsx"',
+            "X-Orders-Count": str(len(orders)),
+        },
+    )
+
+
+@app.get("/api/orders/{order_id}/zpl", tags=["orders"])
+async def download_zpl(
+    order_id: str,
+    source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+):
+    """
+    Genera y descarga la etiqueta ZPL como archivo .txt.
+    Vía de contingencia cuando la impresora no está disponible.
+    """
+    provider = get_provider(source)
+    try:
+        order = await provider.get_order(order_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
+
+    zpl_str = build_zpl(order, dpi=settings.ZEBRA_DPI)
+    await log_event(order_id, source, "zpl_download", "ZPL descargado manualmente para impresión de contingencia")
+
+    return Response(
+        content=zpl_str.encode("utf-8"),
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="etiqueta_{order_id}.txt"',
+        },
+    )
+
+
+@app.post("/api/orders/{order_id}/set-status", tags=["orders"])
+async def set_order_status(
+    order_id: str,
+    new_status: str = Query(..., description="processing | completed | cancelled"),
+    source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+):
+    """
+    Cambia el estado de un pedido manualmente.
+    - processing → revierte a cola (no sincroniza con plataforma)
+    - completed  → marca como completado + sincroniza con WooCommerce
+    - cancelled  → marca como ERROR localmente + registra evento (sin sincronización automática)
+    """
+    STATUS_MAP = {
+        "processing": OrderStatus.PROCESSING,
+        "completed":  OrderStatus.COMPLETED,
+        "cancelled":  OrderStatus.ERROR,
+    }
+    internal_status = STATUS_MAP.get(new_status)
+    if internal_status is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Estado no válido: '{new_status}'. Use: processing, completed, cancelled",
+        )
+
+    provider = get_provider(source)
+    try:
+        order = await provider.get_order(order_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
+
+    order.status = internal_status
+    await upsert_order(order)
+    await log_event(order_id, source, f"manual_{new_status}", f"Estado cambiado manualmente a '{new_status}'")
+
+    remote_synced = False
+    if internal_status == OrderStatus.COMPLETED:
+        remote_synced = await provider.update_order_status(
+            order_id, OrderStatus.COMPLETED,
+            note="Pedido completado manualmente desde bodega.",
+        )
+        await log_event(
+            order_id, source,
+            "completed" if remote_synced else "complete_sync_failed",
+            "WooCommerce actualizado" if remote_synced else "Fallo sincronización remota",
+        )
+
+    return {
+        "success":       True,
+        "order_id":      order_id,
+        "new_status":    new_status,
+        "remote_synced": remote_synced,
     }
 
 
