@@ -167,41 +167,42 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
     elements.append(header_table)
     elements.append(Spacer(1, 0.5 * cm))
 
-    # ── Tabla de ítemes (eco-tinta: sin fondos, solo bordes) ─────
+    # ── Tabla de ítemes (eco-tinta: sin fondos ni grillas) ──────
     elements.append(HRFlowable(width="100%", thickness=1, color=COLOR_ACCENT, spaceAfter=6))
 
-    table_header = ["#", "SKU", "Producto", "Cant.", "✓"]
+    # Sin columna SKU: solo #, Producto, Cant., ✓
+    table_header = ["#", "Producto", "Cant.", "✓"]
     table_data = [table_header]
 
     for idx, item in enumerate(order.items, start=1):
         table_data.append([
             str(idx),
-            item.sku,
             item.name,
             str(item.quantity),
             "",   # checkbox manual para el operario
         ])
 
-    col_widths = [1 * cm, 3 * cm, 10 * cm, 1.5 * cm, 1.5 * cm]
+    # El espacio liberado del SKU (3 cm) se suma a Producto
+    col_widths = [1 * cm, 13 * cm, 1.5 * cm, 1.5 * cm]
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     items_table.setStyle(TableStyle([
-        # Encabezado — texto oscuro en negrita, sin fondo
+        # Encabezado — negrita sin fondo
         ("TEXTCOLOR",    (0, 0), (-1, 0),  COLOR_DARK),
         ("FONTNAME",     (0, 0), (-1, 0),  "Helvetica-Bold"),
         ("FONTSIZE",     (0, 0), (-1, 0),  10),
         ("ALIGN",        (0, 0), (-1, 0),  "CENTER"),
         ("LINEBELOW",    (0, 0), (-1, 0),  1.5, COLOR_ACCENT),
-        # Filas de datos — sin relleno
+        # Filas de datos — sin relleno ni grilla
         ("FONTSIZE",     (0, 1), (-1, -1), 10),
-        ("ALIGN",        (0, 1), (1, -1),  "CENTER"),
-        ("ALIGN",        (3, 1), (4, -1),  "CENTER"),
+        ("ALIGN",        (0, 1), (0, -1),  "CENTER"),   # columna #
+        ("ALIGN",        (2, 1), (3, -1),  "CENTER"),   # Cant. y ✓
         ("TOPPADDING",   (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
         ("LEFTPADDING",  (0, 0), (-1, -1), 4),
-        # Bordes ligeros
-        ("GRID",         (0, 0), (-1, -1), 0.3, COLOR_GRAY),
-        ("BOX",          (0, 0), (-1, -1), 1,   COLOR_DARK),
-        ("BOX",          (4, 1), (4, -1),  1,   COLOR_DARK),
+        # Solo línea horizontal entre filas (sin grilla vertical ni caja exterior)
+        ("LINEBELOW",    (0, 1), (-1, -1), 0.4, COLOR_GRAY),
+        # Caja solo alrededor del checkbox
+        ("BOX",          (3, 1), (3, -1),  1,   COLOR_GRAY),
     ]))
     elements.append(items_table)
     elements.append(Spacer(1, 0.5 * cm))

@@ -196,65 +196,65 @@
   <div id="scan-result" class="hidden animate-slide-in bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-coffee-200">
 
     <!-- Header con ID, fuente y estado -->
-    <div class="bg-coffee-900 text-white p-5">
+    <div class="bg-coffee-900 text-white px-4 py-3">
       <div class="flex items-center justify-between">
         <div>
-          <div class="flex items-center gap-2 mb-1">
-            <p class="text-coffee-200 text-sm font-medium">Pedido verificado</p>
+          <div class="flex items-center gap-2 mb-0.5">
+            <p class="text-coffee-300 text-xs font-medium">Pedido verificado</p>
             <span id="result-status-badge"></span>
           </div>
-          <p id="result-id" class="text-3xl font-bold tracking-wide"></p>
+          <p id="result-id" class="text-xl font-bold tracking-wide"></p>
         </div>
         <div id="result-source-badge" class="flex flex-col items-center gap-1"></div>
       </div>
     </div>
 
     <!-- Datos del destinatario -->
-    <div class="p-5 border-b border-coffee-100">
-      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-3">Destinatario</h3>
-      <div class="grid grid-cols-2 gap-3">
+    <div class="px-4 py-3 border-b border-coffee-100">
+      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-2">Destinatario</h3>
+      <div class="grid grid-cols-2 gap-2">
         <div>
           <p class="text-xs text-coffee-400">Nombre</p>
-          <p id="result-name" class="font-bold text-lg leading-tight"></p>
+          <p id="result-name" class="font-bold leading-tight"></p>
         </div>
         <div>
           <p class="text-xs text-coffee-400">Teléfono</p>
-          <p id="result-phone" class="font-semibold text-lg"></p>
+          <p id="result-phone" class="font-semibold"></p>
         </div>
         <div class="col-span-2">
           <p class="text-xs text-coffee-400">Dirección</p>
-          <p id="result-address" class="font-semibold"></p>
+          <p id="result-address" class="text-sm font-semibold"></p>
         </div>
         <div>
           <p class="text-xs text-coffee-400">Ciudad</p>
-          <p id="result-city" class="font-semibold"></p>
+          <p id="result-city" class="text-sm font-semibold"></p>
         </div>
       </div>
     </div>
 
     <!-- Ítemes -->
-    <div class="p-5 border-b border-coffee-100">
-      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-3">
+    <div class="px-4 py-3 border-b border-coffee-100">
+      <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-2">
         Ítemes a Despachar
       </h3>
-      <div id="result-items" class="space-y-2"></div>
+      <div id="result-items" class="space-y-1"></div>
     </div>
 
     <!-- Nota del cliente -->
-    <div id="result-note-section" class="hidden px-5 pb-3 pt-0">
-      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+    <div id="result-note-section" class="hidden px-4 pb-2 pt-0">
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
         <p class="text-xs font-bold text-amber-700 mb-1">Nota del cliente</p>
         <p id="result-note" class="text-sm text-amber-800"></p>
       </div>
     </div>
 
     <!-- Acciones -->
-    <div class="p-5 bg-coffee-50 space-y-3">
+    <div class="px-4 py-3 bg-coffee-50 space-y-2">
 
       <!-- Botones secundarios: descargas -->
       <div class="flex gap-2">
         <button onclick="downloadPickingPdf()"
-          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2.5 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
+          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -262,7 +262,7 @@
           Picking PDF
         </button>
         <button id="zpl-download-btn" onclick="downloadZpl()"
-          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2.5 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
+          class="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-coffee-200 text-coffee-800 font-semibold py-2 rounded-xl hover:border-coffee-400 active:scale-95 transition-all text-sm">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
@@ -272,12 +272,12 @@
       </div>
 
       <!-- Confirmación manual (aparece tras descargar ZPL) -->
-      <div id="zpl-confirm-section" class="hidden bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
+      <div id="zpl-confirm-section" class="hidden bg-amber-50 border-2 border-amber-300 rounded-xl p-3">
         <p class="text-sm font-semibold text-amber-800 mb-2">
           ¿Imprimiste el archivo ZPL con la utilidad Zebra?
         </p>
         <button onclick="setStatus('completed')"
-          class="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold py-3 rounded-xl transition-all shadow flex items-center justify-center gap-2">
+          class="w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
           </svg>
@@ -287,8 +287,8 @@
 
       <!-- Botón principal: imprimir en impresora -->
       <button id="label-btn" onclick="printLabel()"
-        class="w-full bg-green-600 hover:bg-green-700 active:scale-95 text-white font-bold text-xl py-5 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3">
-        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        class="w-full bg-green-600 hover:bg-green-700 active:scale-95 text-white font-bold text-lg py-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
         </svg>
@@ -296,29 +296,36 @@
       </button>
 
       <!-- Spinner de impresión -->
-      <div id="label-loading" class="hidden text-center py-4">
+      <div id="label-loading" class="hidden text-center py-3">
         <svg class="spinner w-8 h-8 text-coffee-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
         </svg>
-        <p class="text-coffee-600 font-medium">Enviando a impresora...</p>
+        <p class="text-coffee-600 font-medium text-sm">Enviando a impresora...</p>
       </div>
 
       <!-- Error de impresión -->
-      <div id="label-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-4">
-        <p class="font-bold text-red-700">❌ Error de impresión</p>
+      <div id="label-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-3">
+        <p class="font-bold text-red-700 text-sm">❌ Error de impresión</p>
         <p id="label-error-msg" class="text-sm text-red-600 mt-1"></p>
-        <button onclick="printLabel()" class="mt-3 w-full bg-red-600 text-white py-2.5 rounded-lg font-semibold hover:bg-red-700 transition-all">
-          🔄 Reintentar
-        </button>
+        <div class="flex gap-2 mt-3">
+          <button onclick="printLabel()" class="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition-all">
+            🔄 Reintentar
+          </button>
+          <!-- Fallback: descarga manual ZPL cuando la impresora falla -->
+          <button id="zpl-fallback-btn" onclick="downloadZpl()"
+            class="hidden flex-1 bg-amber-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
+            ⬇ Descargar ZPL
+          </button>
+        </div>
       </div>
 
       <!-- Éxito -->
-      <div id="label-success" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 text-center">
-        <p class="text-4xl mb-1">✅</p>
-        <p class="font-bold text-green-700 text-lg">Etiqueta impresa con éxito</p>
+      <div id="label-success" class="hidden bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+        <p class="text-3xl mb-1">✅</p>
+        <p class="font-bold text-green-700">Etiqueta impresa con éxito</p>
         <p class="text-sm text-green-600 mt-0.5">Pedido marcado como completado</p>
-        <button onclick="resetScanner()" class="mt-3 w-full bg-coffee-900 text-white py-3 rounded-xl font-bold hover:bg-coffee-800 transition-all">
+        <button onclick="resetScanner()" class="mt-2 w-full bg-coffee-900 text-white py-2.5 rounded-xl font-bold hover:bg-coffee-800 transition-all text-sm">
           Escanear siguiente pedido
         </button>
       </div>
@@ -328,15 +335,15 @@
         <p class="text-xs text-coffee-400 font-semibold uppercase tracking-widest mb-2">Cambio manual de estado</p>
         <div class="flex gap-2">
           <button onclick="setStatus('processing')"
-            class="flex-1 bg-blue-50 border border-blue-200 text-blue-700 font-semibold py-2 rounded-xl text-xs hover:bg-blue-100 active:scale-95 transition-all">
+            class="flex-1 bg-blue-50 border border-blue-200 text-blue-700 font-semibold py-1.5 rounded-xl text-xs hover:bg-blue-100 active:scale-95 transition-all">
             🔄 Procesando
           </button>
           <button onclick="setStatus('completed')"
-            class="flex-1 bg-green-50 border border-green-200 text-green-700 font-semibold py-2 rounded-xl text-xs hover:bg-green-100 active:scale-95 transition-all">
+            class="flex-1 bg-green-50 border border-green-200 text-green-700 font-semibold py-1.5 rounded-xl text-xs hover:bg-green-100 active:scale-95 transition-all">
             ✅ Completado
           </button>
           <button onclick="setStatus('cancelled')"
-            class="flex-1 bg-red-50 border border-red-200 text-red-700 font-semibold py-2 rounded-xl text-xs hover:bg-red-100 active:scale-95 transition-all">
+            class="flex-1 bg-red-50 border border-red-200 text-red-700 font-semibold py-1.5 rounded-xl text-xs hover:bg-red-100 active:scale-95 transition-all">
             ❌ Cancelar
           </button>
         </div>
@@ -347,8 +354,9 @@
 </section>
 
 <script>
-  let currentOrder = null;
-  let activeView   = 'dashboard';
+  let currentOrder    = null;
+  let activeView      = 'dashboard';
+  let lastScannedId   = null;   // Para detectar el doble escaneo consecutivo
   const DEFAULT_SOURCE = 'woocommerce';
 
   const SOURCE_ICONS = {
@@ -583,7 +591,8 @@
       ? new Date(order.created_at).toLocaleString('es-CL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
       : '';
 
-    const statusBadge = orderStatusBadge(order.status);
+    const statusBadge    = orderStatusBadge(order.status);
+    const regionBadgeHtml = regionBadge(order.shipping);
 
     return `
     <div class="bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow border border-coffee-100 overflow-hidden">
@@ -593,6 +602,7 @@
           <div class="flex items-center gap-2">
             <span class="text-xs px-2 py-0.5 rounded-full font-bold ${src.color}">${src.label}</span>
             ${statusBadge}
+            ${regionBadgeHtml}
           </div>
           <span class="text-xs text-coffee-400">${dateStr}</span>
         </div>
@@ -649,6 +659,17 @@
     return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cls}">${labels[status] || status}</span>`;
   }
 
+  // Devuelve un badge "RM" (azul) o "Región" (rojo) según el estado/región de envío
+  function regionBadge(shipping) {
+    const state = (shipping?.state || '').trim().toUpperCase();
+    if (!state) return '';
+    const isRM = state === 'RM' || state.includes('METROPOLITANA');
+    if (isRM) {
+      return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-sky-100 text-sky-700">RM</span>`;
+    }
+    return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700">Región</span>`;
+  }
+
   // ── Dashboard — preparar pedido (genera PDF individual) ────────
   async function prepareOrder(orderId, source) {
     const btn = document.querySelector(`[data-id="${orderId}"]`);
@@ -687,8 +708,23 @@
   function handleScanInput(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
-      searchOrder();
+      const input = document.getElementById('scan-input');
+      const id    = input.value.trim().replace(/^#/, '');
+      if (!id) { input.focus(); return; }
+
+      // Doble escaneo: mismo código cuando ya hay un pedido cargado
+      if (currentOrder && id === String(currentOrder.id)) {
+        input.value = '';
+        autoPrintAndComplete();
+      } else {
+        searchOrder();
+      }
     }
+  }
+
+  // Dispara la impresión automática y resetea la vista al terminar
+  async function autoPrintAndComplete() {
+    await printLabel(/*autoReset=*/true);
   }
 
   async function searchOrder() {
@@ -781,11 +817,13 @@
     }
 
     // Resetear estados de acciones
+    lastScannedId = String(order.id);
     document.getElementById('label-btn').classList.remove('hidden');
     document.getElementById('label-loading').classList.add('hidden');
     document.getElementById('label-error').classList.add('hidden');
     document.getElementById('label-success').classList.add('hidden');
     document.getElementById('zpl-confirm-section').classList.add('hidden');
+    document.getElementById('zpl-fallback-btn').classList.add('hidden');
 
     document.getElementById('scan-result').classList.remove('hidden');
   }
@@ -836,7 +874,7 @@
   }
 
   // ── Verificar — impresión en Zebra ────────────────────────────
-  async function printLabel() {
+  async function printLabel(autoReset = false) {
     if (!currentOrder) return;
 
     document.getElementById('label-btn').classList.add('hidden');
@@ -864,22 +902,32 @@
         document.getElementById('label-error-msg').textContent = msg;
         document.getElementById('label-error').classList.remove('hidden');
         document.getElementById('label-btn').classList.remove('hidden');
-        toast('Error de impresión — verifica la impresora o usa Descargar ZPL', 'error');
+        // Fallback ZPL: mostrar también el botón de descarga manual
+        document.getElementById('zpl-fallback-btn').classList.remove('hidden');
+        toast('Error de impresión — usa "Descargar ZPL" como respaldo', 'error');
         return;
       }
 
       document.getElementById('label-success').classList.remove('hidden');
       document.getElementById('zpl-confirm-section').classList.add('hidden');
+      document.getElementById('zpl-fallback-btn').classList.add('hidden');
       toast(`Pedido #${id} completado ✅`, 'success');
-      currentOrder = null;
+      currentOrder  = null;
+      lastScannedId = null;
 
       if (activeView === 'dashboard') loadOrders();
+
+      // En flujo automático (doble escaneo) se resetea sin esperar al botón
+      if (autoReset) {
+        setTimeout(resetScanner, 1500);
+      }
 
     } catch (err) {
       document.getElementById('label-loading').classList.add('hidden');
       document.getElementById('label-error-msg').textContent = 'Error de conexión al servidor';
       document.getElementById('label-error').classList.remove('hidden');
       document.getElementById('label-btn').classList.remove('hidden');
+      document.getElementById('zpl-fallback-btn').classList.remove('hidden');
     }
   }
 
