@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Upper Coffee — Bodega</title>
+  <title>UpperLogistics — Bodega</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -61,8 +61,8 @@
         </svg>
       </div>
       <div>
-        <p class="font-bold text-lg leading-tight">Upper Coffee</p>
-        <p class="text-coffee-200 text-xs leading-tight">Gestión Logística de Bodega</p>
+        <p class="font-bold text-lg leading-tight">UpperLogistics</p>
+        <p class="text-coffee-200 text-xs leading-tight">RealCoffee</p>
       </div>
     </div>
 
@@ -142,8 +142,12 @@
 </section>
 
 <!-- ── Verificar ───────────────────────────────────────────────── -->
-<section id="view-scanner" class="hidden max-w-3xl mx-auto px-4 py-6">
-  <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 border-2 border-coffee-200">
+<section id="view-scanner" class="hidden max-w-7xl mx-auto px-4 py-6">
+  <div class="flex gap-6 items-start">
+
+  <!-- ─── Left column: input ─────────────────────────────────── -->
+  <div class="w-80 flex-shrink-0 space-y-4">
+  <div class="bg-white rounded-2xl shadow-lg p-5 border-2 border-coffee-200">
     <div class="flex items-center gap-3 mb-4">
       <div class="w-12 h-12 bg-coffee-100 rounded-full flex items-center justify-center animate-pulse-ring">
         <svg class="w-7 h-7 text-coffee-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,7 +161,7 @@
       </div>
     </div>
 
-    <div class="flex gap-3">
+    <div class="flex flex-col gap-3">
       <input
         id="scan-input"
         type="text"
@@ -165,12 +169,12 @@
         autocomplete="off"
         autocorrect="off"
         spellcheck="false"
-        placeholder="Escanear o digitar ID…"
-        class="flex-1 bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400"
+        placeholder="Escanear o digitar…"
+        class="w-full bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400 overflow-hidden text-ellipsis"
         onkeydown="handleScanInput(event)"
       />
       <button onclick="searchOrder()"
-        class="bg-coffee-900 text-white px-6 py-3 rounded-xl font-bold text-lg hover:bg-coffee-800 active:scale-95 transition-all shadow-md">
+        class="w-full bg-coffee-900 text-white py-3 rounded-xl font-bold text-lg hover:bg-coffee-800 active:scale-95 transition-all shadow-md">
         Buscar
       </button>
     </div>
@@ -193,6 +197,10 @@
     <p class="text-sm text-red-500 mt-1">Verifica el ID e intenta de nuevo</p>
   </div>
 
+  </div><!-- /left-col -->
+
+  <!-- ─── Right column: result ───────────────────────────────── -->
+  <div class="flex-1 min-w-0">
   <div id="scan-result" class="hidden animate-slide-in bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-coffee-200">
 
     <!-- Header con ID, fuente y estado -->
@@ -285,51 +293,6 @@
         </button>
       </div>
 
-      <!-- Botón principal: imprimir en impresora -->
-      <button id="label-btn" onclick="printLabel()"
-        class="w-full bg-green-600 hover:bg-green-700 active:scale-95 text-white font-bold text-lg py-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-3">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
-        </svg>
-        Confirmar y Etiquetar
-      </button>
-
-      <!-- Spinner de impresión -->
-      <div id="label-loading" class="hidden text-center py-3">
-        <svg class="spinner w-8 h-8 text-coffee-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
-        <p class="text-coffee-600 font-medium text-sm">Enviando a impresora...</p>
-      </div>
-
-      <!-- Error de impresión -->
-      <div id="label-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-3">
-        <p class="font-bold text-red-700 text-sm">❌ Error de impresión</p>
-        <p id="label-error-msg" class="text-sm text-red-600 mt-1"></p>
-        <div class="flex gap-2 mt-3">
-          <button onclick="printLabel()" class="flex-1 bg-red-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition-all">
-            🔄 Reintentar
-          </button>
-          <!-- Fallback: descarga manual ZPL cuando la impresora falla -->
-          <button id="zpl-fallback-btn" onclick="downloadZpl()"
-            class="hidden flex-1 bg-amber-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition-all">
-            ⬇ Descargar ZPL
-          </button>
-        </div>
-      </div>
-
-      <!-- Éxito -->
-      <div id="label-success" class="hidden bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-        <p class="text-3xl mb-1">✅</p>
-        <p class="font-bold text-green-700">Etiqueta impresa con éxito</p>
-        <p class="text-sm text-green-600 mt-0.5">Pedido marcado como completado</p>
-        <button onclick="resetScanner()" class="mt-2 w-full bg-coffee-900 text-white py-2.5 rounded-xl font-bold hover:bg-coffee-800 transition-all text-sm">
-          Escanear siguiente pedido
-        </button>
-      </div>
-
       <!-- Cambio manual de estado -->
       <div class="pt-1">
         <p class="text-xs text-coffee-400 font-semibold uppercase tracking-widest mb-2">Cambio manual de estado</p>
@@ -350,7 +313,9 @@
       </div>
 
     </div>
-  </div>
+  </div><!-- /scan-result -->
+  </div><!-- /right-col -->
+  </div><!-- /flex-wrapper -->
 </section>
 
 <script>
@@ -646,6 +611,7 @@
       preparing:   'bg-amber-100 text-amber-700',
       labeled:     'bg-indigo-100 text-indigo-700',
       completed:   'bg-green-100 text-green-700',
+      cancelled:   'bg-red-100 text-red-700',
       error:       'bg-red-100 text-red-700',
     };
     const labels = {
@@ -653,6 +619,7 @@
       preparing:  'En Preparación',
       labeled:    'Etiquetado',
       completed:  'Completado',
+      cancelled:  'Cancelado',
       error:      'Error',
     };
     const cls = map[status] || 'bg-gray-100 text-gray-700';
@@ -734,6 +701,7 @@
       input.focus();
       return;
     }
+    input.value = ''; // limpiar inmediatamente para evitar concatenación en el siguiente escaneo
 
     document.getElementById('scan-result').classList.add('hidden');
     document.getElementById('scan-error').classList.add('hidden');
@@ -818,12 +786,7 @@
 
     // Resetear estados de acciones
     lastScannedId = String(order.id);
-    document.getElementById('label-btn').classList.remove('hidden');
-    document.getElementById('label-loading').classList.add('hidden');
-    document.getElementById('label-error').classList.add('hidden');
-    document.getElementById('label-success').classList.add('hidden');
     document.getElementById('zpl-confirm-section').classList.add('hidden');
-    document.getElementById('zpl-fallback-btn').classList.add('hidden');
 
     document.getElementById('scan-result').classList.remove('hidden');
   }
@@ -877,19 +840,12 @@
   async function printLabel(autoReset = false) {
     if (!currentOrder) return;
 
-    document.getElementById('label-btn').classList.add('hidden');
-    document.getElementById('label-loading').classList.remove('hidden');
-    document.getElementById('label-error').classList.add('hidden');
-    document.getElementById('label-success').classList.add('hidden');
-
     const { id, source } = currentOrder;
 
     try {
       const r = await fetch(`/api/orders/${id}/label?source=${source || DEFAULT_SOURCE}`, {
         method: 'POST'
       });
-
-      document.getElementById('label-loading').classList.add('hidden');
 
       const body = await r.json().catch(() => ({}));
 
@@ -898,19 +854,11 @@
         const msg = typeof detail === 'string'
           ? detail
           : `${detail.message || 'Error'} — ${detail.reason || ''} (${detail.printer || ''})`;
-
-        document.getElementById('label-error-msg').textContent = msg;
-        document.getElementById('label-error').classList.remove('hidden');
-        document.getElementById('label-btn').classList.remove('hidden');
-        // Fallback ZPL: mostrar también el botón de descarga manual
-        document.getElementById('zpl-fallback-btn').classList.remove('hidden');
-        toast('Error de impresión — usa "Descargar ZPL" como respaldo', 'error');
+        toast(`Error de impresión: ${msg} — usa "Descargar ZPL" como respaldo`, 'error');
         return;
       }
 
-      document.getElementById('label-success').classList.remove('hidden');
       document.getElementById('zpl-confirm-section').classList.add('hidden');
-      document.getElementById('zpl-fallback-btn').classList.add('hidden');
       toast(`Pedido #${id} completado ✅`, 'success');
       currentOrder  = null;
       lastScannedId = null;
@@ -923,11 +871,7 @@
       }
 
     } catch (err) {
-      document.getElementById('label-loading').classList.add('hidden');
-      document.getElementById('label-error-msg').textContent = 'Error de conexión al servidor';
-      document.getElementById('label-error').classList.remove('hidden');
-      document.getElementById('label-btn').classList.remove('hidden');
-      document.getElementById('zpl-fallback-btn').classList.remove('hidden');
+      toast('Error de conexión al servidor', 'error');
     }
   }
 
@@ -952,12 +896,9 @@
       toast(`Pedido #${id} marcado como ${labels[newStatus] || newStatus}`, 'success');
 
       if (newStatus === 'completed') {
-        document.getElementById('label-btn').classList.add('hidden');
         document.getElementById('zpl-confirm-section').classList.add('hidden');
-        document.getElementById('label-success').classList.remove('hidden');
-      } else {
-        resetScanner();
       }
+      resetScanner();
 
       currentOrder = null;
       if (activeView === 'dashboard') loadOrders();

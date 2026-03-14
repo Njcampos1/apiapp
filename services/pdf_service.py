@@ -170,8 +170,8 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
     # ── Tabla de ítemes (eco-tinta: sin fondos ni grillas) ──────
     elements.append(HRFlowable(width="100%", thickness=1, color=COLOR_ACCENT, spaceAfter=6))
 
-    # Sin columna SKU: solo #, Producto, Cant., ✓
-    table_header = ["#", "Producto", "Cant.", "✓"]
+    # Sin columna SKU y sin columna Checkbox: solo #, Producto, Cant.
+    table_header = ["#", "Producto", "Cant."]
     table_data = [table_header]
 
     for idx, item in enumerate(order.items, start=1):
@@ -179,11 +179,10 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
             str(idx),
             item.name,
             str(item.quantity),
-            "",   # checkbox manual para el operario
         ])
 
-    # El espacio liberado del SKU (3 cm) se suma a Producto
-    col_widths = [1 * cm, 13 * cm, 1.5 * cm, 1.5 * cm]
+    # El espacio del checkbox se suma a Producto (antes 13, ahora 14.5)
+    col_widths = [1 * cm, 14.5 * cm, 1.5 * cm]
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     items_table.setStyle(TableStyle([
         # Encabezado — negrita sin fondo
@@ -195,14 +194,12 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
         # Filas de datos — sin relleno ni grilla
         ("FONTSIZE",     (0, 1), (-1, -1), 10),
         ("ALIGN",        (0, 1), (0, -1),  "CENTER"),   # columna #
-        ("ALIGN",        (2, 1), (3, -1),  "CENTER"),   # Cant. y ✓
+        ("ALIGN",        (2, 1), (2, -1),  "CENTER"),   # Cant.
         ("TOPPADDING",   (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
         ("LEFTPADDING",  (0, 0), (-1, -1), 4),
         # Solo línea horizontal entre filas (sin grilla vertical ni caja exterior)
         ("LINEBELOW",    (0, 1), (-1, -1), 0.4, COLOR_GRAY),
-        # Caja solo alrededor del checkbox
-        ("BOX",          (3, 1), (3, -1),  1,   COLOR_GRAY),
     ]))
     elements.append(items_table)
     elements.append(Spacer(1, 0.5 * cm))
@@ -219,7 +216,7 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
     elements.append(HRFlowable(width="100%", thickness=1, color=COLOR_GRAY, spaceBefore=8))
     elements.append(
         Paragraph(
-            "Upper Coffee — Sistema de Gestión Logística &nbsp;|&nbsp; Documento interno",
+            "Upper Logistics - www.upperlogistics.com",
             ParagraphStyle("footer", parent=styles["Normal"], fontSize=8,
                            textColor=COLOR_GRAY, alignment=TA_CENTER),
         )
