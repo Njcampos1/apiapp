@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     AZURE_REGISTRY:   str = ""
     AZURE_IMAGE_NAME: str = "upperapp-logistics"
 
+    # ── Mercado Libre ─────────────────────────────────────────────
+    # Obtenidos en https://developers.mercadolibre.cl/es_ar/registra-tu-aplicacion
+    MELI_APP_ID:       str = ""   # App ID (Client ID) de tu aplicación MeLi
+    MELI_CLIENT_SECRET: str = "" # Secret Key de tu aplicación MeLi
+    # URI registrada en el panel de MeLi → debe coincidir exactamente.
+    # Ejemplo: https://tu-dominio.azure.com/api/meli/callback
+    MELI_REDIRECT_URI: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

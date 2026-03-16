@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 
 from config import settings
 from models.order import NormalizedOrder, OrderStatus
@@ -39,12 +39,26 @@ CREATE TABLE IF NOT EXISTS order_events (
 );
 """
 
+# Un solo registro activo (id = 1 siempre). CHECK garantiza la unicidad semántica.
+CREATE_MELI_TOKENS_TABLE = """
+CREATE TABLE IF NOT EXISTS meli_tokens (
+    id            INTEGER PRIMARY KEY DEFAULT 1,
+    access_token  TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    seller_id     TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL,
+    CHECK (id = 1)
+);
+"""
+
 
 async def init_db() -> None:
     """Crea las tablas si no existen y aplica migraciones pendientes."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_ORDERS_TABLE)
         await db.execute(CREATE_EVENTS_TABLE)
+        await db.execute(CREATE_MELI_TOKENS_TABLE)
         await db.commit()
         # Migración: añadir completed_at si la columna aún no existe
         try:
@@ -138,3 +152,70 @@ async def get_completed_orders() -> List[NormalizedOrder]:
         except Exception as exc:
             logger.warning("No se pudo deserializar pedido para Excel: %s", exc)
     return results
+
+
+# ── Tokens de Mercado Libre ──────────────────────────────────────────────────
+
+class MeliTokenRow(TypedDict):
+    access_token:  str
+    refresh_token: str
+    expires_at:    datetime
+    seller_id:     str
+
+
+async def get_meli_token() -> Optional[MeliTokenRow]:
+    """
+    Devuelve el único registro de tokens de Mercado Libre o None si aún
+    no se ha completado el flujo OAuth.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT access_token, refresh_token, expires_at, seller_id "
+            "FROM meli_tokens WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return MeliTokenRow(
+        access_token=row["access_token"],
+        refresh_token=row["refresh_token"],
+        expires_at=datetime.fromisoformat(row["expires_at"]),
+        seller_id=row["seller_id"] or "",
+    )
+
+
+async def save_meli_token(
+    access_token: str,
+    refresh_token: str,
+    expires_at: datetime,
+    seller_id: str = "",
+) -> None:
+    """
+    Guarda o actualiza el par de tokens de Mercado Libre.
+    El campo seller_id se preserva si se llama con cadena vacía
+    (útil al refrescar tokens sin conocer el seller_id todavía).
+    """
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO meli_tokens (id, access_token, refresh_token, expires_at, seller_id, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                access_token  = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                expires_at    = excluded.expires_at,
+                seller_id     = CASE
+                                    WHEN excluded.seller_id != ''
+                                    THEN excluded.seller_id
+                                    ELSE meli_tokens.seller_id
+                                END,
+                updated_at    = excluded.updated_at
+            """,
+            (access_token, refresh_token, expires_at.isoformat(), seller_id, now),
+        )
+        await db.commit()
+    logger.debug("Tokens de MeLi guardados (expiran: %s)", expires_at.isoformat())

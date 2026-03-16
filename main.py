@@ -27,8 +27,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
@@ -38,10 +39,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders
+from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders, save_meli_token
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
 from providers.woo_client import WooCommerceProvider
+from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl
@@ -79,9 +81,20 @@ def build_providers() -> ProviderRegistry:
             "WooCommerce no configurado — falta WOO_URL, WOO_KEY o WOO_SECRET"
         )
 
-    # Ejemplo futuro:
-    # if settings.MELI_TOKEN:
-    #     reg[OrderSource.MERCADOLIBRE.value] = MeliProvider(token=settings.MELI_TOKEN)
+    # MercadoLibre — se activa si están presentes las credenciales OAuth.
+    # El access_token se carga de forma perezosa desde la BD en la primera
+    # petición; no se requiere que los tokens existan en el momento de arranque.
+    if settings.MELI_APP_ID and settings.MELI_CLIENT_SECRET:
+        reg[OrderSource.MERCADOLIBRE.value] = MeliProvider(
+            app_id=settings.MELI_APP_ID,
+            client_secret=settings.MELI_CLIENT_SECRET,
+            redirect_uri=settings.MELI_REDIRECT_URI,
+        )
+        logger.info("Proveedor registrado: MercadoLibre (APP_ID=%s)", settings.MELI_APP_ID)
+    else:
+        logger.warning(
+            "MercadoLibre no configurado — falta MELI_APP_ID o MELI_CLIENT_SECRET"
+        )
 
     return reg
 
@@ -158,6 +171,59 @@ async def printer_test():
     )
     ok, msg = await zpl_svc.test_connection()
     return {"reachable": ok, "message": msg}
+
+
+# ── Mercado Libre — OAuth ─────────────────────────────────────────
+@app.get("/api/meli/callback", tags=["meli"])
+async def meli_oauth_callback(
+    code: str = Query(..., description="Código de autorización recibido de Mercado Libre"),
+    state: Optional[str] = Query(default=None),
+):
+    """
+    Endpoint que recibe el authorization code tras la autorización manual
+    del administrador en Mercado Libre.
+
+    Flujo:
+      1. El administrador navega a la URL de autorización de MeLi:
+           https://auth.mercadolibre.cl/authorization
+             ?response_type=code
+             &client_id={MELI_APP_ID}
+             &redirect_uri={MELI_REDIRECT_URI}
+      2. MeLi redirige aquí con ?code=XXXX
+      3. Este endpoint intercambia el code por tokens y los persiste en SQLite.
+      4. Todos los requests futuros usan esos tokens (con auto-refresh).
+    """
+    provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+    if provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El proveedor MercadoLibre no está activo. "
+                "Verifica que MELI_APP_ID y MELI_CLIENT_SECRET estén configurados."
+            ),
+        )
+
+    meli: MeliProvider = provider  # type: ignore[assignment]
+    try:
+        await meli.exchange_code(code)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mercado Libre rechazó el código de autorización: {exc.response.text}",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Error inesperado en callback de MercadoLibre")
+        raise HTTPException(status_code=500, detail=f"Error interno: {exc}")
+
+    return {
+        "success": True,
+        "message": (
+            "Autorización completada. Tokens de MercadoLibre guardados "
+            "en la base de datos. El proveedor está listo para usarse."
+        ),
+    }
 
 
 # ── Frontend SPA ─────────────────────────────────────────────────
