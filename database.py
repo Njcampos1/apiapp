@@ -67,6 +67,16 @@ async def init_db() -> None:
             logger.info("Columna completed_at añadida a orders")
         except aiosqlite.OperationalError:
             pass  # La columna ya existe
+
+        # Migración: añadir seller_id a meli_tokens si la columna aún no existe
+        try:
+            await db.execute(
+                "ALTER TABLE meli_tokens ADD COLUMN seller_id TEXT NOT NULL DEFAULT ''"
+            )
+            await db.commit()
+            logger.info("Columna seller_id añadida a meli_tokens")
+        except aiosqlite.OperationalError:
+            pass  # La columna ya existe
     logger.info("SQLite DB inicializada en %s", DB_PATH)
 
 
