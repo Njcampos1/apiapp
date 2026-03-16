@@ -29,6 +29,7 @@ from typing import List, Optional
 
 import httpx
 
+from config import settings
 from database import get_meli_token, save_meli_token
 from models.order import (
     NormalizedOrder,
@@ -120,15 +121,20 @@ class MeliProvider(BaseOrderProvider):
 
         Lanza httpx.HTTPStatusError si MeLi rechaza el código.
         """
+        redirect_uri = settings.MELI_REDIRECT_URI.strip()
+        logger.debug(
+            "MeLi: intercambiando code por token — redirect_uri enviado: %r",
+            redirect_uri,
+        )
         try:
             resp = await self._client.post(
                 _TOKEN_URL,
-                json={
+                data={
                     "grant_type":    "authorization_code",
                     "client_id":     self._app_id,
                     "client_secret": self._client_secret,
                     "code":          code,
-                    "redirect_uri":  self._redirect_uri,
+                    "redirect_uri":  redirect_uri,
                 },
             )
             resp.raise_for_status()
@@ -434,7 +440,7 @@ class MeliProvider(BaseOrderProvider):
         try:
             resp = await self._client.post(
                 _TOKEN_URL,
-                json={
+                data={
                     "grant_type":    "refresh_token",
                     "client_id":     self._app_id,
                     "client_secret": self._client_secret,
