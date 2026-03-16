@@ -364,6 +364,112 @@ async def export_excel():
     )
 
 
+# ── Mercado Libre — Descarga masiva ZPL nativo ───────────────────
+@app.get("/api/orders/meli/bulk-zpl", tags=["meli"])
+async def bulk_meli_zpl(
+    ids: str = Query(
+        ...,
+        description="IDs de pedidos MeLi separados por coma, ej: 123456789,987654321",
+    ),
+):
+    """
+    Descarga un único archivo .txt con las etiquetas ZPL nativas de Mercado Libre
+    concatenadas para todos los IDs indicados.
+
+    Comportamiento:
+    - Consulta el endpoint /shipment_labels de MeLi con response_type=zpl2.
+    - Al obtener el ZPL, MeLi marca automáticamente el envío como
+      'listo para despachar'; este endpoint refleja ese cambio guardando
+      OrderStatus.COMPLETED en la BD local.
+    - Si un ID falla, se omite del archivo y el endpoint continúa con los demás.
+    - Solo lanza error 502 si NINGÚN ID pudo procesarse correctamente.
+
+    El archivo descargado es compatible con Labelary (labelary.com/viewer.html).
+    """
+    provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+    if provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El proveedor MercadoLibre no está activo. "
+                "Verifica que MELI_APP_ID y MELI_CLIENT_SECRET estén configurados."
+            ),
+        )
+    meli: MeliProvider = provider  # type: ignore[assignment]
+
+    order_ids = [oid.strip() for oid in ids.split(",") if oid.strip()]
+    if not order_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Debes proporcionar al menos un ID de pedido en el parámetro ?ids=",
+        )
+
+    zpl_blocks: List[str] = []
+    failed: List[dict] = []
+
+    for order_id in order_ids:
+        try:
+            zpl = await meli.get_native_zpl(order_id)
+            zpl_clean = zpl.strip()
+
+            # Validación básica: el ZPL nativo debe empezar con ^XA y terminar con ^XZ
+            if not zpl_clean:
+                raise RuntimeError("MeLi devolvió un ZPL vacío")
+
+            zpl_blocks.append(zpl_clean)
+
+            # Actualizar estado local a COMPLETED (MeLi ya lo marcó como
+            # 'listo para despachar' en el momento de consultar el ZPL)
+            order = await meli.get_order(order_id)
+            if order:
+                order.status = OrderStatus.COMPLETED
+                await upsert_order(order)
+
+            await log_event(
+                order_id,
+                OrderSource.MERCADOLIBRE.value,
+                "bulk_zpl_downloaded",
+                "ZPL nativo descargado — pedido marcado como COMPLETED en BD local",
+            )
+            logger.info("MeLi bulk-zpl: pedido %s procesado OK", order_id)
+
+        except Exception as exc:
+            logger.error(
+                "MeLi bulk-zpl: error al procesar pedido %s — %s", order_id, exc
+            )
+            failed.append({"order_id": order_id, "error": str(exc)})
+
+    if not zpl_blocks:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "No se pudo obtener ZPL para ninguno de los pedidos indicados.",
+                "failed": failed,
+            },
+        )
+
+    combined_zpl = "\n".join(zpl_blocks)
+
+    response_headers = {
+        "Content-Disposition": 'attachment; filename="etiquetas_meli.txt"',
+        "X-Labels-Count": str(len(zpl_blocks)),
+        "X-Failed-Count": str(len(failed)),
+    }
+    if failed:
+        response_headers["X-Failed-Ids"] = ",".join(f["order_id"] for f in failed)
+
+    logger.info(
+        "MeLi bulk-zpl: %d etiquetas generadas, %d fallidos",
+        len(zpl_blocks),
+        len(failed),
+    )
+    return Response(
+        content=combined_zpl.encode("utf-8"),
+        media_type="text/plain",
+        headers=response_headers,
+    )
+
+
 @app.get("/api/orders/{order_id}/zpl", tags=["orders"])
 async def download_zpl(
     order_id: str,

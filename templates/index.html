@@ -86,16 +86,31 @@
 
 <div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
+<!-- ── Botón flotante descarga masiva MeLi ─────────────────────── -->
+<div id="bulk-download-btn" class="hidden fixed bottom-6 right-6 z-40 animate-slide-in">
+  <button onclick="downloadBulkMeliZpl()"
+    class="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 px-6 rounded-2xl shadow-xl transition-all text-base">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+    </svg>
+    Descargar etiquetas seleccionadas
+    <span id="bulk-count-badge"
+      class="bg-yellow-900 text-yellow-100 text-xs font-black rounded-full px-2 py-0.5 min-w-[1.25rem] text-center">
+    </span>
+  </button>
+</div>
+
 <!-- ── Dashboard ──────────────────────────────────────────────── -->
 <section id="view-dashboard" class="max-w-7xl mx-auto px-4 py-6">
-  <div class="flex items-center justify-between mb-6 gap-3 flex-wrap">
+  <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
     <div>
       <h1 class="text-2xl font-bold">Pedidos en Cola</h1>
       <p class="text-sm text-coffee-600 mt-0.5">
         <span id="order-count">—</span> pedidos listos para preparar
       </p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 flex-wrap">
       <button onclick="exportAllOrders()" id="export-all-btn"
         class="flex items-center gap-2 bg-coffee-400 text-coffee-900 px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-200 active:scale-95 transition-all shadow">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -121,6 +136,36 @@
         Actualizar
       </button>
     </div>
+  </div>
+
+  <!-- ── Pestañas de filtro ────────────────────────────────────── -->
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <button onclick="setFilter('all')" id="pill-all"
+      class="filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all">
+      Todos
+    </button>
+    <button onclick="setFilter('woocommerce')" id="pill-woocommerce"
+      class="filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all">
+      WooCommerce
+    </button>
+    <button onclick="setFilter('mercadolibre')" id="pill-mercadolibre"
+      class="filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all">
+      Mercado Libre
+    </button>
+  </div>
+
+  <!-- ── Barra de selección masiva MeLi ───────────────────────── -->
+  <div id="meli-bulk-bar" class="hidden mb-4 flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-2.5">
+    <input
+      type="checkbox"
+      id="select-all-meli"
+      onchange="toggleAllMeli(this.checked)"
+      class="w-5 h-5 rounded cursor-pointer accent-yellow-500"
+    />
+    <label for="select-all-meli" class="text-sm font-semibold text-yellow-800 cursor-pointer select-none">
+      Seleccionar todos
+    </label>
+    <span id="meli-selected-count" class="text-xs text-yellow-600 ml-auto font-medium"></span>
   </div>
 
   <div id="api-errors" class="hidden mb-4"></div>
@@ -321,8 +366,12 @@
 <script>
   let currentOrder    = null;
   let activeView      = 'dashboard';
-  let lastScannedId   = null;   // Para detectar el doble escaneo consecutivo
+  let lastScannedId   = null;
   const DEFAULT_SOURCE = 'woocommerce';
+
+  // ── Estado del dashboard ──────────────────────────────────────
+  let allOrders     = [];   // Todos los pedidos recibidos de la API
+  let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre'
 
   const SOURCE_ICONS = {
     woocommerce: {
@@ -346,6 +395,7 @@
     },
   };
 
+  // ── Utilidades genéricas ───────────────────────────────────────
   function toast(msg, type = 'info') {
     const colors = {
       success: 'bg-green-600 text-white',
@@ -406,13 +456,88 @@
     }
   }
 
-  // ── Dashboard — carga de pedidos ───────────────────────────────
+  // ── Dashboard — filtro de pestañas ────────────────────────────
+  function setFilter(filter) {
+    currentFilter = filter;
+
+    // Estilos de pills: activo vs inactivo
+    const pills = {
+      all:           document.getElementById('pill-all'),
+      woocommerce:   document.getElementById('pill-woocommerce'),
+      mercadolibre:  document.getElementById('pill-mercadolibre'),
+    };
+    const activeClass   = 'bg-coffee-900 text-white shadow-md';
+    const inactiveClass = 'bg-coffee-100 text-coffee-700 border border-coffee-200 hover:bg-coffee-200';
+
+    Object.entries(pills).forEach(([key, el]) => {
+      el.className = `filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all ${
+        key === filter ? activeClass : inactiveClass
+      }`;
+    });
+
+    renderOrders();
+  }
+
+  // ── Dashboard — renderizado reactivo (sin re-fetch) ───────────
+  function renderOrders() {
+    const grid    = document.getElementById('orders-grid');
+    const empty   = document.getElementById('empty-state');
+    const count   = document.getElementById('order-count');
+    const meliBar = document.getElementById('meli-bulk-bar');
+
+    let filtered;
+    if (currentFilter === 'mercadolibre') {
+      // La pestaña MeLi muestra TODOS sus pedidos, incluidos los completados
+      filtered = allOrders.filter(o => o.source === 'mercadolibre');
+      // Pendientes primero, completados al final
+      filtered.sort((a, b) => {
+        const aDone = a.status === 'completed' ? 1 : 0;
+        const bDone = b.status === 'completed' ? 1 : 0;
+        return aDone - bDone;
+      });
+    } else if (currentFilter === 'woocommerce') {
+      filtered = allOrders.filter(o => o.source === 'woocommerce');
+    } else {
+      // "Todos": excluye completados (ya procesados)
+      filtered = allOrders.filter(o => o.status !== 'completed');
+    }
+
+    const inMeliFilter = currentFilter === 'mercadolibre';
+
+    // Mostrar/ocultar barra de selección MeLi
+    meliBar.classList.toggle('hidden', !inMeliFilter);
+
+    // Resetear select-all al cambiar de pestaña
+    const selectAll = document.getElementById('select-all-meli');
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    // Contar solo los pendientes en la etiqueta del encabezado
+    const pendingCount = filtered.filter(o => o.status !== 'completed').length;
+    count.textContent = inMeliFilter
+      ? `${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''} · ${filtered.length - pendingCount} ya generado${filtered.length - pendingCount !== 1 ? 's' : ''}`
+      : filtered.length;
+
+    if (filtered.length === 0) {
+      grid.classList.add('hidden');
+      empty.classList.remove('hidden');
+    } else {
+      empty.classList.add('hidden');
+      grid.innerHTML = filtered.map(o => buildOrderCard(o)).join('');
+      grid.classList.remove('hidden');
+    }
+
+    updateBulkButton();
+  }
+
+  // ── Dashboard — carga de pedidos (fetch + cache) ───────────────
   async function loadOrders() {
     const grid    = document.getElementById('orders-grid');
     const loading = document.getElementById('orders-loading');
     const empty   = document.getElementById('empty-state');
     const icon    = document.getElementById('refresh-icon');
-    const count   = document.getElementById('order-count');
     const errBox  = document.getElementById('api-errors');
 
     grid.classList.add('hidden');
@@ -437,21 +562,14 @@
         errBox.classList.remove('hidden');
       }
 
-      const orders = d.orders || [];
-      count.textContent = orders.length;
-
-      if (orders.length === 0) {
-        empty.classList.remove('hidden');
-        return;
-      }
-
-      grid.innerHTML = orders.map(o => buildOrderCard(o)).join('');
-      grid.classList.remove('hidden');
+      // Guardar todos los pedidos en el array global y delegar al render
+      allOrders = d.orders || [];
+      renderOrders();
 
     } catch (err) {
       loading.classList.add('hidden');
       icon.classList.remove('spinner');
-      count.textContent = '—';
+      document.getElementById('order-count').textContent = '—';
       toast('Error de conexión al servidor', 'error');
     }
   }
@@ -545,7 +663,21 @@
     }
   }
 
-  function buildOrderCard(order) {    const src  = sourceInfo(order.source);
+  // ── Badge de tipo logístico (solo MeLi) ───────────────────────
+  function logisticBadge(order) {
+    const logisticType = (order.platform_meta && order.platform_meta.logistic_type) || '';
+    if (!logisticType) return '';
+
+    const isFull = logisticType.toLowerCase().includes('fulfillment');
+    if (isFull) {
+      return `<span class="text-xs px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-700">⚡ FULL</span>`;
+    }
+    return `<span class="text-xs px-2 py-0.5 rounded-full font-bold bg-gray-100 text-gray-600">🚚 Despacho</span>`;
+  }
+
+  // ── Construcción de tarjeta de pedido ─────────────────────────
+  function buildOrderCard(order) {
+    const src  = sourceInfo(order.source);
     const ship = order.shipping || {};
     const name = [ship.first_name, ship.last_name].filter(Boolean).join(' ') || 'Sin nombre';
     const city = ship.city || '—';
@@ -556,20 +688,75 @@
       ? new Date(order.created_at).toLocaleString('es-CL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
       : '';
 
-    const statusBadge    = orderStatusBadge(order.status);
+    const statusBadge     = orderStatusBadge(order.status);
     const regionBadgeHtml = regionBadge(order.shipping);
 
+    const isMeli      = order.source === 'mercadolibre';
+    const isCompleted = order.status === 'completed';
+    const showCheckbox = currentFilter === 'mercadolibre' && isMeli;
+
+    // Badge logístico solo para MeLi
+    const logisticHtml = isMeli ? logisticBadge(order) : '';
+
+    // Visual para pedidos MeLi ya completados
+    const cardOpacity     = (isMeli && isCompleted) ? 'opacity-60' : '';
+    const completedBanner = (isMeli && isCompleted)
+      ? `<div class="bg-green-100 border-b border-green-200 px-4 py-1.5 flex items-center gap-2">
+           <span class="text-green-700 text-xs font-bold">✅ Etiqueta ya generada</span>
+         </div>`
+      : '';
+
+    // Checkbox en esquina superior derecha solo en pestaña MeLi
+    const checkboxHtml = showCheckbox
+      ? `<input
+           type="checkbox"
+           class="meli-checkbox absolute top-3 right-3 w-5 h-5 rounded cursor-pointer accent-yellow-500 z-10"
+           value="${order.id}"
+           ${isCompleted ? 'disabled title="Etiqueta ya generada"' : ''}
+           onchange="updateBulkButton()"
+         />`
+      : '';
+
+    // El botón de acción cambia según plataforma y estado
+    const actionBtn = (isMeli && isCompleted)
+      ? `<button disabled
+           class="w-full bg-green-100 text-green-600 font-bold py-3.5 rounded-xl text-base flex items-center justify-center gap-2 cursor-not-allowed">
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+           </svg>
+           Etiqueta generada
+         </button>`
+      : `<button
+           onclick="prepareOrder('${order.id}', '${order.source}')"
+           data-id="${order.id}"
+           class="prepare-btn w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+               d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+           </svg>
+           Preparar pedido
+         </button>`;
+
+    const stripColor = order.source === 'woocommerce'
+      ? 'bg-purple-500'
+      : order.source === 'mercadolibre'
+        ? 'bg-yellow-400'
+        : 'bg-gray-400';
+
     return `
-    <div class="bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow border border-coffee-100 overflow-hidden">
-      <div class="h-1.5 ${order.source === 'woocommerce' ? 'bg-purple-500' : order.source === 'mercadolibre' ? 'bg-yellow-400' : 'bg-gray-400'}"></div>
+    <div class="relative bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow border border-coffee-100 overflow-hidden ${cardOpacity}">
+      ${checkboxHtml}
+      <div class="h-1.5 ${stripColor}"></div>
+      ${completedBanner}
       <div class="p-5">
         <div class="flex items-start justify-between mb-3">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded-full font-bold ${src.color}">${src.label}</span>
             ${statusBadge}
             ${regionBadgeHtml}
+            ${logisticHtml}
           </div>
-          <span class="text-xs text-coffee-400">${dateStr}</span>
+          <span class="text-xs text-coffee-400 ${showCheckbox ? 'pr-7' : ''}">${dateStr}</span>
         </div>
         <p class="text-2xl font-black text-coffee-900 mb-3 tracking-tight">#${order.id}</p>
         <div class="space-y-1 mb-4">
@@ -591,16 +778,7 @@
           <span class="text-coffee-600">${itemCount} unidad${itemCount !== 1 ? 'es' : ''} · ${(order.items || []).length} producto${(order.items || []).length !== 1 ? 's' : ''}</span>
           <span class="font-bold text-coffee-900">${total}</span>
         </div>
-        <button
-          onclick="prepareOrder('${order.id}', '${order.source}')"
-          data-id="${order.id}"
-          class="prepare-btn w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-          </svg>
-          Preparar pedido
-        </button>
+        ${actionBtn}
       </div>
     </div>`;
   }
@@ -626,7 +804,6 @@
     return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cls}">${labels[status] || status}</span>`;
   }
 
-  // Devuelve un badge "RM" (azul) o "Región" (rojo) según el estado/región de envío
   function regionBadge(shipping) {
     const state = (shipping?.state || '').trim().toUpperCase();
     if (!state) return '';
@@ -635,6 +812,113 @@
       return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-sky-100 text-sky-700">RM</span>`;
     }
     return `<span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700">Región</span>`;
+  }
+
+  // ── Selección múltiple MeLi ────────────────────────────────────
+
+  /** Actualiza la visibilidad del botón flotante y el estado del select-all */
+  function updateBulkButton() {
+    const checkboxes = document.querySelectorAll('.meli-checkbox:not([disabled])');
+    const checked    = document.querySelectorAll('.meli-checkbox:not([disabled]):checked');
+    const btn        = document.getElementById('bulk-download-btn');
+    const badge      = document.getElementById('bulk-count-badge');
+    const countEl    = document.getElementById('meli-selected-count');
+    const selectAll  = document.getElementById('select-all-meli');
+
+    if (currentFilter === 'mercadolibre' && checked.length > 0) {
+      btn.classList.remove('hidden');
+      badge.textContent = checked.length;
+    } else {
+      btn.classList.add('hidden');
+    }
+
+    // Estado indeterminado del select-all
+    if (selectAll) {
+      if (checkboxes.length === 0) {
+        selectAll.checked       = false;
+        selectAll.indeterminate = false;
+      } else if (checked.length === 0) {
+        selectAll.checked       = false;
+        selectAll.indeterminate = false;
+      } else if (checked.length === checkboxes.length) {
+        selectAll.checked       = true;
+        selectAll.indeterminate = false;
+      } else {
+        selectAll.checked       = false;
+        selectAll.indeterminate = true;
+      }
+    }
+
+    if (countEl) {
+      countEl.textContent = checked.length > 0
+        ? `${checked.length} seleccionado${checked.length !== 1 ? 's' : ''}`
+        : '';
+    }
+  }
+
+  /** Selecciona o deselecciona todos los checkboxes MeLi habilitados */
+  function toggleAllMeli(checked) {
+    document.querySelectorAll('.meli-checkbox:not([disabled])').forEach(cb => {
+      cb.checked = checked;
+    });
+    updateBulkButton();
+  }
+
+  /** Descarga ZPL masivo para los pedidos MeLi seleccionados */
+  async function downloadBulkMeliZpl() {
+    const checked = document.querySelectorAll('.meli-checkbox:not([disabled]):checked');
+    const ids = Array.from(checked).map(cb => cb.value);
+
+    if (ids.length === 0) return;
+
+    const bulkBtn = document.getElementById('bulk-download-btn').querySelector('button');
+    bulkBtn.disabled = true;
+
+    try {
+      const url = `/api/orders/meli/bulk-zpl?ids=${ids.join(',')}`;
+      const r   = await fetch(url);
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        const msg = (err.detail && typeof err.detail === 'object')
+          ? err.detail.message
+          : (err.detail || r.statusText);
+        toast(`Error: ${msg}`, 'error');
+        return;
+      }
+
+      const labelCount  = r.headers.get('X-Labels-Count') || ids.length;
+      const failedCount = parseInt(r.headers.get('X-Failed-Count') || '0', 10);
+
+      const blob   = await r.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a      = document.createElement('a');
+      a.href       = blobUrl;
+      a.download   = 'etiquetas_meli.txt';
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+
+      toast(
+        `${labelCount} etiqueta${labelCount != 1 ? 's' : ''} descargada${labelCount != 1 ? 's' : ''}` +
+        (failedCount > 0 ? ` · ${failedCount} fallido${failedCount !== 1 ? 's' : ''}` : ''),
+        failedCount > 0 ? 'warn' : 'success'
+      );
+
+      // Marcar los pedidos descargados como completados en el cache local
+      // para que aparezcan con el banner "Etiqueta ya generada" en esta sesión
+      ids.forEach(id => {
+        const order = allOrders.find(o => String(o.id) === String(id));
+        if (order) order.status = 'completed';
+      });
+
+      // Refrescar la vista (los pedidos procesados quedan visibles pero marcados)
+      renderOrders();
+
+    } catch {
+      toast('Error de conexión', 'error');
+    } finally {
+      bulkBtn.disabled = false;
+    }
   }
 
   // ── Dashboard — preparar pedido (genera PDF individual) ────────
@@ -689,7 +973,6 @@
     }
   }
 
-  // Dispara la impresión automática y resetea la vista al terminar
   async function autoPrintAndComplete() {
     await printLabel(/*autoReset=*/true);
   }
@@ -701,7 +984,7 @@
       input.focus();
       return;
     }
-    input.value = ''; // limpiar inmediatamente para evitar concatenación en el siguiente escaneo
+    input.value = '';
 
     document.getElementById('scan-result').classList.add('hidden');
     document.getElementById('scan-error').classList.add('hidden');
@@ -749,10 +1032,8 @@
     document.getElementById('result-address').textContent = addr;
     document.getElementById('result-city').textContent    = ship.city || '—';
 
-    // Badge de estado (desde la BD local, campo 'status' del JSON devuelto)
     document.getElementById('result-status-badge').innerHTML = orderStatusBadge(order.status);
 
-    // Badge de fuente
     const src = sourceInfo(order.source);
     document.getElementById('result-source-badge').innerHTML = `
       <div class="flex flex-col items-center gap-1 ${src.color} rounded-xl p-2">
@@ -760,7 +1041,6 @@
         <span class="text-xs font-bold">${src.label}</span>
       </div>`;
 
-    // Ítemes
     const itemsHtml = (order.items || []).map(item => `
       <div class="flex items-center justify-between py-1.5 px-3 bg-coffee-50 rounded-xl">
         <div class="flex-1 min-w-0">
@@ -775,7 +1055,6 @@
       </div>`).join('');
     document.getElementById('result-items').innerHTML = itemsHtml || '<p class="text-coffee-400 text-sm">Sin ítemes</p>';
 
-    // Nota del cliente
     const noteSection = document.getElementById('result-note-section');
     if (order.customer_note) {
       document.getElementById('result-note').textContent = order.customer_note;
@@ -784,15 +1063,12 @@
       noteSection.classList.add('hidden');
     }
 
-    // Resetear estados de acciones
     lastScannedId = String(order.id);
     document.getElementById('zpl-confirm-section').classList.add('hidden');
-
     document.getElementById('scan-result').classList.remove('hidden');
   }
 
   // ── Verificar — descargas ──────────────────────────────────────
-
   async function downloadPickingPdf() {
     if (!currentOrder) return;
     const { id, source } = currentOrder;
@@ -828,7 +1104,6 @@
       a.download = `etiqueta_${id}.txt`;
       a.click();
       URL.revokeObjectURL(url);
-      // Mostrar sección de confirmación manual
       document.getElementById('zpl-confirm-section').classList.remove('hidden');
       toast('ZPL descargado — confirma la impresión manual cuando esté lista', 'info');
     } catch {
@@ -865,7 +1140,6 @@
 
       if (activeView === 'dashboard') loadOrders();
 
-      // En flujo automático (doble escaneo) se resetea sin esperar al botón
       if (autoReset) {
         setTimeout(resetScanner, 1500);
       }
@@ -924,6 +1198,7 @@
 
   // ── Inicialización ────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {
+    setFilter('all'); // Aplica estilos de pills en el estado inicial
     loadOrders();
     pingPrinter();
     setInterval(pingPrinter, 30_000);

@@ -194,6 +194,14 @@ class MeliProvider(BaseOrderProvider):
 
             results = data.get("results", [])
             for raw in results:
+                # Omitir pedidos Full (logística fulfillment gestionada por MeLi)
+                logistic_type = (raw.get("shipping") or {}).get("logistic_type", "")
+                if logistic_type == "fulfillment":
+                    logger.debug(
+                        "MeLi: pedido %s omitido (Full/fulfillment)",
+                        raw.get("id"),
+                    )
+                    continue
                 try:
                     normalized.append(self.normalize(raw))
                 except Exception as exc:
@@ -346,6 +354,45 @@ class MeliProvider(BaseOrderProvider):
             },
         )
 
+    async def get_native_zpl(self, order_id: str) -> str:
+        """
+        Obtiene la etiqueta ZPL nativa de MeLi para el envío asociado al pedido.
+        Usa el endpoint /shipment_labels con response_type=zpl2.
+
+        Al consultar este endpoint, MeLi marca automáticamente el envío como
+        'listo para despachar'; no es necesario enviar feedback adicional.
+
+        Lanza RuntimeError si el pedido no existe, no tiene shipping_id,
+        o si la API de MeLi devuelve un error HTTP.
+        """
+        order = await self.get_order(order_id)
+        if order is None:
+            raise RuntimeError(f"Pedido {order_id} no encontrado en Mercado Libre")
+
+        shipping_id = order.platform_meta.get("shipping_id")
+        if not shipping_id:
+            raise RuntimeError(
+                f"Pedido {order_id} no tiene shipping_id asociado; "
+                "puede ser un pedido sin envío asignado o de retiro en punto."
+            )
+
+        logger.debug(
+            "MeLi: solicitando ZPL nativo — shipping_id=%s (pedido %s)",
+            shipping_id,
+            order_id,
+        )
+        zpl = await self._get_text(
+            "/shipment_labels",
+            params={"shipment_ids": str(shipping_id), "response_type": "zpl2"},
+        )
+        logger.info(
+            "MeLi: ZPL obtenido — pedido %s, shipping_id=%s (%d bytes)",
+            order_id,
+            shipping_id,
+            len(zpl),
+        )
+        return zpl
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -482,6 +529,49 @@ class MeliProvider(BaseOrderProvider):
             headers={"Authorization": f"Bearer {access_token}"},
             **kwargs,
         )
+
+    async def _get_text(self, path: str, params: Optional[dict] = None) -> str:
+        """
+        GET autenticado que retorna la respuesta como texto plano (no JSON).
+        Usado para endpoints que devuelven ZPL u otros formatos no-JSON.
+        Incluye reintento único por 401, idéntico al comportamiento de _get().
+        """
+        access_token = await self._ensure_valid_token()
+        url = f"{_BASE_API}{path}"
+
+        try:
+            resp = await self._client.get(
+                url,
+                params=params or {},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            if resp.status_code == 401:
+                logger.warning("MeLi: 401 en GET %s, forzando refresh de token...", path)
+                token = await self._load_token()
+                await self._do_refresh(token.refresh_token)
+                resp = await self._client.get(
+                    url,
+                    params=params or {},
+                    headers={"Authorization": f"Bearer {self._token.access_token}"},  # type: ignore
+                )
+
+            resp.raise_for_status()
+            return resp.text
+
+        except httpx.TimeoutException:
+            logger.error("MeLi: timeout en GET %s", path)
+            raise RuntimeError(f"Mercado Libre no respondió a tiempo en GET {path}")
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "MeLi HTTP %s en GET %s: %s",
+                exc.response.status_code,
+                path,
+                exc.response.text,
+            )
+            raise RuntimeError(
+                f"Mercado Libre error HTTP {exc.response.status_code} en {path}"
+            )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
