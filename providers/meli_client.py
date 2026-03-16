@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import httpx
@@ -175,24 +175,40 @@ class MeliProvider(BaseOrderProvider):
 
     async def get_pending_orders(self) -> List[NormalizedOrder]:
         """
-        Devuelve pedidos en estado 'paid' (pagados, pendientes de despacho).
-        Usa paginación automática de la API de MeLi (limit/offset).
+        Devuelve pedidos en estado 'paid' (pagados, pendientes de despacho)
+        creados en los últimos 30 días.
+
+        Filtros aplicados:
+        - order.status=paid          → solo pagados.
+        - order.date_created.from    → evita deep-pagination sobre el historial
+                                       completo (causaba HTTP 500 en MeLi).
+        - tags=not_delivered         → excluye pedidos ya entregados al comprador;
+                                       no se omite aunque el status sea 'paid'
+                                       porque MeLi mantiene ese status durante
+                                       todo el ciclo (pago → despacho → entrega).
         """
         seller_id = await self._resolve_seller_id()
         normalized: List[NormalizedOrder] = []
         limit  = 50
         offset = 0
 
+        # Ventana de 30 días para evitar iterar el historial completo.
+        from_date = (
+            datetime.now(timezone.utc) - timedelta(days=30)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+
         while True:
             try:
                 data = await self._get(
                     "/orders/search",
                     params={
-                        "seller":       seller_id,
-                        "order.status": "paid",
-                        "sort":         "date_asc",
-                        "limit":        limit,
-                        "offset":       offset,
+                        "seller":                 seller_id,
+                        "order.status":           "paid",
+                        "order.date_created.from": from_date,
+                        "tags":                   "not_delivered",
+                        "sort":                   "date_asc",
+                        "limit":                  limit,
+                        "offset":                 offset,
                     },
                 )
             except RuntimeError:
