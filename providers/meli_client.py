@@ -307,11 +307,22 @@ class MeliProvider(BaseOrderProvider):
         country_obj   = receiver.get("country") or {}
 
         buyer      = raw.get("buyer") or {}
-        phone_data = buyer.get("phone") or {}
-        phone_str  = str(phone_data.get("number", "")).strip()
-        area_code  = str(phone_data.get("area_code", "")).strip()
-        if area_code and not phone_str.startswith(area_code):
-            phone_str = f"{area_code}{phone_str}"
+        # Teléfono: priorizar receiver_address (más fiable en resultados de búsqueda)
+        # ya que buyer.phone suele llegar vacío en /orders/search.
+        phone_str  = ""
+        rec_phone  = receiver.get("phone") or {}
+        if isinstance(rec_phone, dict) and rec_phone.get("number"):
+            area_code = str(rec_phone.get("area_code", "")).strip()
+            num       = str(rec_phone.get("number", "")).strip()
+            phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+        if not phone_str:
+            # Fallback: buyer.phone
+            phone_data = buyer.get("phone") or {}
+            if isinstance(phone_data, dict):
+                area_code = str(phone_data.get("area_code", "")).strip()
+                num       = str(phone_data.get("number", "")).strip()
+                if num:
+                    phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
 
         # ── Nombre del destinatario ─────────────────────────────────────────
         # Priorizar receiver_name de la dirección de envío (más confiable que buyer).
@@ -326,11 +337,39 @@ class MeliProvider(BaseOrderProvider):
             last_name  = buyer.get("last_name", "")
 
         # ── RUT de facturación/envío ────────────────────────────────────────
-        billing_info = raw.get("billing_info") or {}
+        # Intentar en billing_info de nivel raíz y luego en buyer.billing_info
+        billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
         rut = (billing_info.get("doc_number") or "").strip()
+        # Segundo fallback: dentro del array billing_info si viene como lista
+        if not rut and isinstance(billing_info, list):
+            for entry in billing_info:
+                rut = (entry.get("doc_number") or "").strip()
+                if rut:
+                    break
 
         # ── Estado logístico real del envío en MeLi ─────────────────────────
         shipping_status = shipping_raw.get("status", "")
+
+        # ── Tipo de envío — etiqueta legible ────────────────────────────────
+        logistic_type_raw = shipping_raw.get("logistic_type", "")
+        lt = logistic_type_raw.lower()
+        if "fulfillment" in lt:
+            logistic_label = "Full"
+        elif "cross_docking" in lt or "xd_drop_off" in lt or "flex" in lt:
+            logistic_label = "Flex"
+        elif logistic_type_raw:
+            logistic_label = "Despacho normal"
+        else:
+            logistic_label = ""
+
+        # ── Comentario / nota del cliente ───────────────────────────────────
+        # MeLi no expone notas en la API estándar, pero algunos endpoints incluyen
+        # 'notes' en el root o 'additional_info' en billing_info del buyer.
+        customer_note = (
+            (raw.get("notes") or "")
+            or (buyer.get("billing_info") or {}).get("additional_info", "")
+            or ""
+        ).strip()
 
         street   = receiver.get("street_name", "")
         number   = str(receiver.get("street_number", "") or "")
@@ -377,11 +416,20 @@ class MeliProvider(BaseOrderProvider):
         except (ValueError, AttributeError):
             created_at = datetime.utcnow()
 
+        # ── shipping_id: loguear si falta para facilitar depuración del ZPL ─
+        shipping_id = shipping_raw.get("id") or None
+        if not shipping_id:
+            logger.warning(
+                "MeLi: pedido %s sin shipping_id (shipping_raw keys: %s)",
+                raw.get("id"),
+                list(shipping_raw.keys()),
+            )
+
         return NormalizedOrder(
             id=str(raw["id"]),
             source=OrderSource.MERCADOLIBRE,
             status=internal_status,
-            customer_note="",  # MeLi no expone notas de comprador en la API estándar
+            customer_note=customer_note,
             shipping=shipping_addr,
             items=items,
             total=float(raw.get("total_amount", 0)),
@@ -389,8 +437,9 @@ class MeliProvider(BaseOrderProvider):
             created_at=created_at,
             platform_meta={
                 "meli_status":     meli_status,
-                "shipping_id":     shipping_raw.get("id"),
-                "logistic_type":   shipping_raw.get("logistic_type", ""),
+                "shipping_id":     shipping_id,
+                "logistic_type":   logistic_type_raw,
+                "logistic_label":  logistic_label,
                 "buyer_nickname":  buyer.get("nickname", ""),
                 "tags":            raw.get("tags", []),
                 # Campos extendidos para el modal de detalle en el frontend
@@ -416,21 +465,41 @@ class MeliProvider(BaseOrderProvider):
             raise RuntimeError(f"Pedido {order_id} no encontrado en Mercado Libre")
 
         shipping_id = order.platform_meta.get("shipping_id")
+        logger.info(
+            "MeLi: get_native_zpl — pedido=%s, shipping_id=%r, platform_meta=%s",
+            order_id,
+            shipping_id,
+            {k: v for k, v in order.platform_meta.items() if k in ("shipping_id", "logistic_type", "meli_status")},
+        )
+
         if not shipping_id:
             raise RuntimeError(
-                f"Pedido {order_id} no tiene shipping_id asociado; "
-                "puede ser un pedido sin envío asignado o de retiro en punto."
+                f"Pedido {order_id} no tiene shipping_id asociado "
+                f"(platform_meta={order.platform_meta!r}). "
+                "Puede ser un pedido sin envío asignado o de retiro en punto."
             )
 
+        # Algunos endpoints de MeLi requieren el parámetro caller.id (seller_id)
+        seller_id = await self._resolve_seller_id()
+
         logger.debug(
-            "MeLi: solicitando ZPL nativo — shipping_id=%s (pedido %s)",
+            "MeLi: solicitando ZPL nativo — shipping_id=%s, seller_id=%s (pedido %s)",
             shipping_id,
+            seller_id,
             order_id,
         )
         zpl = await self._get_text(
             "/shipment_labels",
-            params={"shipment_ids": str(shipping_id), "response_type": "zpl2"},
+            params={
+                "shipment_ids":  str(shipping_id),
+                "response_type": "zpl2",
+                "caller.id":     seller_id,
+            },
         )
+        if not zpl or not zpl.strip():
+            raise RuntimeError(
+                f"MeLi devolvió ZPL vacío para pedido {order_id} (shipping_id={shipping_id})"
+            )
         logger.info(
             "MeLi: ZPL obtenido — pedido %s, shipping_id=%s (%d bytes)",
             order_id,
