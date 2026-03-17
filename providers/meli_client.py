@@ -22,7 +22,9 @@ Referencias:
 """
 from __future__ import annotations
 
+import io
 import logging
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -246,14 +248,14 @@ class MeliProvider(BaseOrderProvider):
             data = await self._get(f"/orders/{order_id}")
 
             # Desde los cambios PII de MeLi, /orders/{id} solo devuelve shipping.id.
-            # Los campos críticos (status, logistic_type, receiver_address) hay que
-            # obtenerlos de /shipments/{shipping_id} e inyectarlos como objeto completo
-            # para que normalize() los lea correctamente.
+            # Mezclamos (update) en lugar de reemplazar para preservar cualquier clave
+            # que ya venga de la orden y fusionar status, logistic_type,
+            # receiver_address, etc., que vienen de /shipments/{id}.
             shipping_id = (data.get("shipping") or {}).get("id")
             if shipping_id:
                 try:
                     shipment = await self._get(f"/shipments/{shipping_id}")
-                    data["shipping"] = shipment
+                    data["shipping"].update(shipment)
                 except RuntimeError as exc:
                     logger.warning(
                         "MeLi: no se pudo enriquecer /shipments/%s para pedido %s: %s",
@@ -547,7 +549,23 @@ class MeliProvider(BaseOrderProvider):
                 )
 
             resp.raise_for_status()
-            zpl = resp.text
+            raw_bytes = resp.content
+            if raw_bytes.startswith(b"PK"):
+                # MeLi devolvió un ZIP — extraer el .txt interior con el ZPL
+                with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                    txt_names = [n for n in zf.namelist() if n.endswith(".txt")]
+                    if not txt_names:
+                        raise RuntimeError(
+                            f"MeLi devolvió ZIP sin archivo .txt para pedido {order_id}"
+                        )
+                    zpl = zf.read(txt_names[0]).decode("utf-8", errors="replace")
+                logger.debug(
+                    "MeLi: ZIP descomprimido — archivo=%s, pedido=%s",
+                    txt_names[0],
+                    order_id,
+                )
+            else:
+                zpl = raw_bytes.decode("utf-8", errors="replace")
 
         except httpx.TimeoutException:
             logger.error("MeLi: timeout al obtener ZPL para pedido %s", order_id)
@@ -745,6 +763,49 @@ class MeliProvider(BaseOrderProvider):
 
             resp.raise_for_status()
             return resp.text
+
+        except httpx.TimeoutException:
+            logger.error("MeLi: timeout en GET %s", path)
+            raise RuntimeError(f"Mercado Libre no respondió a tiempo en GET {path}")
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "MeLi HTTP %s en GET %s: %s",
+                exc.response.status_code,
+                path,
+                exc.response.text,
+            )
+            raise RuntimeError(
+                f"Mercado Libre error HTTP {exc.response.status_code} en {path}"
+            )
+
+    async def _get_bytes(self, path: str, params: Optional[dict] = None) -> bytes:
+        """
+        GET autenticado que retorna la respuesta como bytes crudos (resp.content).
+        Usado cuando el endpoint puede devolver contenido binario (ej.: ZIP con ZPL).
+        Incluye reintento único por 401, idéntico al comportamiento de _get_text().
+        """
+        access_token = await self._ensure_valid_token()
+        url = f"{_BASE_API}{path}"
+
+        try:
+            resp = await self._client.get(
+                url,
+                params=params or {},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            if resp.status_code == 401:
+                logger.warning("MeLi: 401 en GET %s, forzando refresh de token...", path)
+                token = await self._load_token()
+                await self._do_refresh(token.refresh_token)
+                resp = await self._client.get(
+                    url,
+                    params=params or {},
+                    headers={"Authorization": f"Bearer {self._token.access_token}"},  # type: ignore
+                )
+
+            resp.raise_for_status()
+            return resp.content
 
         except httpx.TimeoutException:
             logger.error("MeLi: timeout en GET %s", path)
