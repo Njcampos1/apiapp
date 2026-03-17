@@ -314,7 +314,7 @@ class MeliProvider(BaseOrderProvider):
                             # el frontend bloquee el checkbox y muestre el banner
                             # "Etiqueta ya generada"
                             shipping_status = (enriched.get("shipping") or {}).get("status", "").lower()
-                            if shipping_status in ("shipped", "delivered"):
+                            if shipping_status in ("shipped", "delivered", "dropped_off"):
                                 order.status = OrderStatus.COMPLETED
                             elif shipping_status == "cancelled":
                                 order.status = OrderStatus.ERROR
@@ -600,6 +600,13 @@ class MeliProvider(BaseOrderProvider):
 
         # MeLi solo genera ZPL cuando el envío está en ready_to_ship.
         # Validar antes de hacer la petición evita un error HTTP confuso.
+        non_printable_states = ("shipped", "delivered", "dropped_off", "cancelled")
+        if shipping_status in non_printable_states:
+            raise RuntimeError(
+                f"No se puede imprimir la etiqueta porque el envío ya fue procesado "
+                f"(estado actual: {shipping_status!r}). "
+                "Este pedido ya no está disponible para impresión en Mercado Libre."
+            )
         if shipping_status != "ready_to_ship":
             raise RuntimeError(
                 f"El envío aún no está listo para imprimir "

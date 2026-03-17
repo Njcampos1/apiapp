@@ -732,8 +732,8 @@
     const isPreparing = order.status === 'preparing' || order.status === 'labeled';
     const showCheckbox = currentFilter === 'mercadolibre' && isMeli;
 
-    // Lógica de bloqueo inteligente: solo bloquear si realmente está despachado/entregado
-    const isMeliLocked = isMeli && (meta.shipping_status === 'shipped' || meta.shipping_status === 'delivered');
+    // Lógica de bloqueo inteligente: solo bloquear si realmente está despachado/entregado/dropped_off
+    const isMeliLocked = isMeli && (meta.shipping_status === 'shipped' || meta.shipping_status === 'delivered' || meta.shipping_status === 'dropped_off');
 
     // ── Badge de estado: para MeLi usamos etiquetas específicas ──
     let statusBadge;

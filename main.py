@@ -245,6 +245,13 @@ async def list_orders():
     """
     Agrega pedidos 'processing' de todos los proveedores configurados, más
     los pedidos WooCommerce en estado 'preparing' (hojas impresas recuperables).
+
+    IMPORTANTE: Los pedidos de Mercado Libre que fueron marcados localmente como
+    COMPLETED se incluyen en la respuesta con su estado local preservado. Esto
+    permite que el frontend los muestre en verde (como 'Etiqueta generada')
+    incluso después de refrescar la página, hasta que Mercado Libre confirme
+    que el envío ya no está pendiente (ej. estado shipped/delivered en la API).
+
     Errores parciales de un proveedor NO bloquean la respuesta global.
     """
     all_orders: List[dict] = []
@@ -255,9 +262,19 @@ async def list_orders():
             orders = await provider.get_pending_orders()
             for o in orders:
                 local_status = await get_local_status(o.id, o.source.value)
-                if local_status and local_status != OrderStatus.PROCESSING:
-                    # Already in preparation or beyond — exclude from queue
-                    continue
+
+                # Para pedidos de WooCommerce: excluir si ya están en preparación o más allá
+                # (estos se obtienen por separado de get_preparing_orders más abajo)
+                if o.source == OrderSource.WOOCOMMERCE:
+                    if local_status and local_status != OrderStatus.PROCESSING:
+                        continue
+
+                # Para Mercado Libre: preservar estado local si existe
+                # Esto permite mostrar pedidos completados localmente en verde
+                # hasta que MeLi confirme el cambio de estado en su API
+                if local_status:
+                    o.status = local_status
+
                 await upsert_order(o)
                 all_orders.append(o.model_dump(mode="json"))
         except Exception as exc:
