@@ -244,6 +244,24 @@ class MeliProvider(BaseOrderProvider):
     async def get_order(self, order_id: str) -> Optional[NormalizedOrder]:
         try:
             data = await self._get(f"/orders/{order_id}")
+
+            # Desde los cambios PII de MeLi, /orders/{id} solo devuelve shipping.id.
+            # Los campos críticos (status, logistic_type, receiver_address) hay que
+            # obtenerlos de /shipments/{shipping_id} e inyectarlos como objeto completo
+            # para que normalize() los lea correctamente.
+            shipping_id = (data.get("shipping") or {}).get("id")
+            if shipping_id:
+                try:
+                    shipment = await self._get(f"/shipments/{shipping_id}")
+                    data["shipping"] = shipment
+                except RuntimeError as exc:
+                    logger.warning(
+                        "MeLi: no se pudo enriquecer /shipments/%s para pedido %s: %s",
+                        shipping_id,
+                        order_id,
+                        exc,
+                    )
+
             return self.normalize(data)
         except RuntimeError as exc:
             if "404" in str(exc):
@@ -458,18 +476,21 @@ class MeliProvider(BaseOrderProvider):
         'listo para despachar'; no es necesario enviar feedback adicional.
 
         Lanza RuntimeError si el pedido no existe, no tiene shipping_id,
-        o si la API de MeLi devuelve un error HTTP.
+        el envío no está en estado ready_to_ship, o si la API de MeLi devuelve
+        un error HTTP (el body de la respuesta se incluye en el mensaje).
         """
         order = await self.get_order(order_id)
         if order is None:
             raise RuntimeError(f"Pedido {order_id} no encontrado en Mercado Libre")
 
-        shipping_id = order.platform_meta.get("shipping_id")
+        shipping_id     = order.platform_meta.get("shipping_id")
+        shipping_status = order.platform_meta.get("shipping_status", "")
+
         logger.info(
-            "MeLi: get_native_zpl — pedido=%s, shipping_id=%r, platform_meta=%s",
+            "MeLi: get_native_zpl — pedido=%s, shipping_id=%r, shipping_status=%r",
             order_id,
             shipping_id,
-            {k: v for k, v in order.platform_meta.items() if k in ("shipping_id", "logistic_type", "meli_status")},
+            shipping_status,
         )
 
         if not shipping_id:
@@ -479,8 +500,24 @@ class MeliProvider(BaseOrderProvider):
                 "Puede ser un pedido sin envío asignado o de retiro en punto."
             )
 
-        # Algunos endpoints de MeLi requieren el parámetro caller.id (seller_id)
-        seller_id = await self._resolve_seller_id()
+        # MeLi solo genera ZPL cuando el envío está en ready_to_ship.
+        # Validar antes de hacer la petición evita un error HTTP confuso.
+        if shipping_status != "ready_to_ship":
+            raise RuntimeError(
+                f"El envío aún no está listo para imprimir "
+                f"(estado actual: {shipping_status!r}). "
+                "Mercado Libre requiere estado 'ready_to_ship' para generar la etiqueta ZPL."
+            )
+
+        seller_id    = await self._resolve_seller_id()
+        access_token = await self._ensure_valid_token()
+
+        url    = f"{_BASE_API}/shipment_labels"
+        params = {
+            "shipment_ids":  str(shipping_id),
+            "response_type": "zpl2",
+            "caller.id":     seller_id,
+        }
 
         logger.debug(
             "MeLi: solicitando ZPL nativo — shipping_id=%s, seller_id=%s (pedido %s)",
@@ -488,14 +525,49 @@ class MeliProvider(BaseOrderProvider):
             seller_id,
             order_id,
         )
-        zpl = await self._get_text(
-            "/shipment_labels",
-            params={
-                "shipment_ids":  str(shipping_id),
-                "response_type": "zpl2",
-                "caller.id":     seller_id,
-            },
-        )
+
+        try:
+            resp = await self._client.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            # Reintento único por 401 inesperado, igual que _get() y _get_text()
+            if resp.status_code == 401:
+                logger.warning(
+                    "MeLi: 401 en GET /shipment_labels, forzando refresh de token..."
+                )
+                token = await self._load_token()
+                await self._do_refresh(token.refresh_token)
+                resp = await self._client.get(
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {self._token.access_token}"},  # type: ignore
+                )
+
+            resp.raise_for_status()
+            zpl = resp.text
+
+        except httpx.TimeoutException:
+            logger.error("MeLi: timeout al obtener ZPL para pedido %s", order_id)
+            raise RuntimeError(
+                f"Mercado Libre no respondió a tiempo al solicitar ZPL del pedido {order_id}"
+            )
+        except httpx.HTTPStatusError as exc:
+            meli_error = exc.response.text
+            logger.error(
+                "MeLi HTTP %s al obtener ZPL — pedido=%s, shipping_id=%s, respuesta=%s",
+                exc.response.status_code,
+                order_id,
+                shipping_id,
+                meli_error,
+            )
+            raise RuntimeError(
+                f"Mercado Libre rechazó la etiqueta ZPL para pedido {order_id} "
+                f"(HTTP {exc.response.status_code}): {meli_error}"
+            )
+
         if not zpl or not zpl.strip():
             raise RuntimeError(
                 f"MeLi devolvió ZPL vacío para pedido {order_id} (shipping_id={shipping_id})"
