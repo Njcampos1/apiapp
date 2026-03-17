@@ -732,6 +732,9 @@
     const isPreparing = order.status === 'preparing' || order.status === 'labeled';
     const showCheckbox = currentFilter === 'mercadolibre' && isMeli;
 
+    // Lógica de bloqueo inteligente: solo bloquear si realmente está despachado/entregado
+    const isMeliLocked = isMeli && (meta.shipping_status === 'shipped' || meta.shipping_status === 'delivered');
+
     // ── Badge de estado: para MeLi usamos etiquetas específicas ──
     let statusBadge;
     if (isMeli) {
@@ -760,11 +763,11 @@
          </div>`
       : '';
 
-    // Visual para pedidos MeLi ya completados
-    const cardOpacity     = (isMeli && isCompleted) ? 'opacity-70' : '';
+    // Visual para pedidos MeLi completados pero no bloqueados
+    const cardOpacity = isMeliLocked ? 'opacity-70' : '';
     const completedBanner = (isMeli && isCompleted)
       ? `<div class="bg-green-50 border-b border-green-200 px-4 py-1.5 flex items-center gap-2">
-           <span class="text-green-700 text-xs font-bold">✅ Etiqueta ya generada</span>
+           <span class="text-green-700 text-xs font-bold">✅ Etiqueta generada ${isMeliLocked ? '' : '(Reimpresión disponible)'}</span>
          </div>`
       : '';
 
@@ -776,29 +779,42 @@
       : '';
 
     // Checkbox en esquina superior derecha solo en pestaña MeLi
+    // Solo se deshabilita si isMeliLocked (ya despachado/entregado)
     const checkboxHtml = showCheckbox
       ? `<input
            type="checkbox"
            class="meli-checkbox absolute top-3 right-3 w-5 h-5 rounded cursor-pointer accent-yellow-500 z-10"
            value="${order.id}"
-           ${isCompleted ? 'disabled title="Etiqueta ya generada"' : ''}
+           ${isMeliLocked ? 'disabled title="Ya despachado"' : ''}
            onchange="updateBulkButton()"
          />`
       : '';
 
     // ── Botón de acción según plataforma y estado ─────────────────
     let actionBtn;
-    if (isMeli && isCompleted) {
-      // MeLi completado: botón deshabilitado pero tarjeta permanece visible
+    if (isMeli && isMeliLocked) {
+      // MeLi ya despachado/entregado: botón gris deshabilitado
       actionBtn = `<button disabled
-           class="w-full bg-green-50 text-green-600 font-bold py-3.5 rounded-xl text-base flex items-center justify-center gap-2 cursor-not-allowed">
+           class="w-full bg-gray-100 text-gray-500 font-bold py-3.5 rounded-xl text-base flex items-center justify-center gap-2 cursor-not-allowed">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+               d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
            </svg>
-           Etiqueta generada
+           🚚 Ya despachado
+         </button>`;
+    } else if (isMeli && isCompleted) {
+      // MeLi completado pero no locked: botón de reimpresión
+      actionBtn = `<button
+           onclick="downloadSingleZpl('${order.source}', '${order.id}')"
+           class="w-full bg-blue-500 hover:bg-blue-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+               d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+           </svg>
+           Re-descargar ZPL
          </button>`;
     } else if (isMeli) {
-      // MeLi pendiente: botón "Ver detalle" que abre el modal (usa cache, sin JSON en attr)
+      // MeLi pendiente: botón "Ver detalle" que abre el modal
       actionBtn = `<button
            onclick="openMeliDetailModal('${order.source}', '${order.id}')"
            class="w-full bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
@@ -1042,6 +1058,38 @@
       toast('Error de conexión', 'error');
     } finally {
       bulkBtn.disabled = false;
+    }
+  }
+
+  /** Descarga ZPL individual para reimpresión */
+  async function downloadSingleZpl(source, id) {
+    try {
+      const url = `/api/orders/${id}/zpl?source=${source}`;
+      const r = await fetch(url);
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        const msg = (err.detail && typeof err.detail === 'object')
+          ? err.detail.message
+          : (err.detail || r.statusText);
+        toast(`Error al descargar ZPL: ${msg}`, 'error');
+        return;
+      }
+
+      const blob = await r.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `zpl_${id}.txt`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+
+      toast('Etiqueta ZPL descargada correctamente', 'success');
+
+      // Refrescar pedidos para actualizar el estado si cambió
+      await loadOrders();
+    } catch (err) {
+      toast(`Error: ${err.message}`, 'error');
     }
   }
 
