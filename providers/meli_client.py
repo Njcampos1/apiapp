@@ -22,6 +22,7 @@ Referencias:
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import zipfile
@@ -188,6 +189,10 @@ class MeliProvider(BaseOrderProvider):
                                        no se omite aunque el status sea 'paid'
                                        porque MeLi mantiene ese status durante
                                        todo el ciclo (pago → despacho → entrega).
+
+        Nota: Cada orden se enriquece consultando /shipments/{id} y /billing_info
+        en paralelo para recuperar datos PII y el estado real del envío, evitando
+        que el dashboard muestre campos vacíos o permita imprimir pedidos ya shipped.
         """
         seller_id = await self._resolve_seller_id()
         normalized: List[NormalizedOrder] = []
@@ -198,6 +203,41 @@ class MeliProvider(BaseOrderProvider):
         from_date = (
             datetime.now(timezone.utc) - timedelta(days=30)
         ).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+
+        async def _enrich_order(raw: dict) -> Optional[dict]:
+            """
+            Enriquece una orden con datos de /shipments/{id} y /billing_info.
+            Retorna el raw actualizado o None si hubo un error crítico.
+            """
+            order_id = raw.get("id")
+            shipping_id = (raw.get("shipping") or {}).get("id")
+
+            # Enriquecer con datos del shipment (incluye estado real del envío)
+            if shipping_id:
+                try:
+                    shipment_data = await self._get(f"/shipments/{shipping_id}")
+                    raw["shipping"].update(shipment_data)
+                except RuntimeError as exc:
+                    logger.warning(
+                        "MeLi: no se pudo enriquecer /shipments/%s para pedido %s: %s",
+                        shipping_id,
+                        order_id,
+                        exc,
+                    )
+
+            # Enriquecer con datos de facturación (RUT, etc.)
+            if order_id:
+                try:
+                    billing_data = await self._get(f"/orders/{order_id}/billing_info")
+                    raw["billing_info"] = billing_data
+                except RuntimeError as exc:
+                    logger.warning(
+                        "MeLi: no se pudo enriquecer billing_info para pedido %s: %s",
+                        order_id,
+                        exc,
+                    )
+
+            return raw
 
         while True:
             try:
@@ -217,8 +257,10 @@ class MeliProvider(BaseOrderProvider):
                 raise  # Ya logueado en _get
 
             results = data.get("results", [])
+
+            # Filtrar pedidos Full antes de enriquecer (no vale la pena el overhead)
+            filtered_results = []
             for raw in results:
-                # Omitir pedidos Full (logística fulfillment gestionada por MeLi)
                 logistic_type = (raw.get("shipping") or {}).get("logistic_type", "")
                 if logistic_type == "fulfillment":
                     logger.debug(
@@ -226,14 +268,50 @@ class MeliProvider(BaseOrderProvider):
                         raw.get("id"),
                     )
                     continue
+                filtered_results.append(raw)
+
+            # Enriquecer todas las órdenes en paralelo con asyncio.gather
+            if filtered_results:
                 try:
-                    normalized.append(self.normalize(raw))
-                except Exception as exc:
-                    logger.warning(
-                        "MeLi: no se pudo normalizar pedido %s: %s",
-                        raw.get("id"),
-                        exc,
+                    enriched_orders = await asyncio.gather(
+                        *[_enrich_order(raw) for raw in filtered_results],
+                        return_exceptions=True  # No romper si una falla
                     )
+
+                    # Normalizar cada orden enriquecida
+                    for enriched in enriched_orders:
+                        if enriched is None or isinstance(enriched, Exception):
+                            # Loguear y continuar si hubo un error
+                            logger.warning(
+                                "MeLi: error al enriquecer orden: %s",
+                                enriched if isinstance(enriched, Exception) else "resultado None",
+                            )
+                            continue
+
+                        try:
+                            order = self.normalize(enriched)
+
+                            # Mapeo de estado inteligente: si el envío ya fue despachado,
+                            # entregado o cancelado, forzar el estado interno para que
+                            # el frontend bloquee el checkbox y muestre el banner
+                            # "Etiqueta ya generada"
+                            shipping_status = (enriched.get("shipping") or {}).get("status", "").lower()
+                            if shipping_status in ("shipped", "delivered"):
+                                order.status = OrderStatus.COMPLETED
+                            elif shipping_status == "cancelled":
+                                order.status = OrderStatus.ERROR
+
+                            normalized.append(order)
+
+                        except Exception as exc:
+                            logger.warning(
+                                "MeLi: no se pudo normalizar pedido %s: %s",
+                                enriched.get("id"),
+                                exc,
+                            )
+
+                except Exception as exc:
+                    logger.error("MeLi: error en asyncio.gather durante enriquecimiento: %s", exc)
 
             paging = data.get("paging", {})
             offset += len(results)
