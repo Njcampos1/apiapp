@@ -291,8 +291,9 @@ class MeliProvider(BaseOrderProvider):
         Mapea el JSON crudo de un pedido de Mercado Libre al modelo interno.
 
         Estructura relevante del payload MeLi:
-          raw.buyer            → datos del comprador (first_name, last_name, phone)
-          raw.shipping         → objeto con receiver_address anidado
+          raw.buyer            → datos del comprador (nickname, phone)
+          raw.shipping         → objeto con receiver_address anidado (nombre real, dirección)
+          raw.billing_info     → datos de facturación (doc_number = RUT)
           raw.order_items[]    → líneas de pedido
           raw.total_amount     → monto total
           raw.currency_id      → código de moneda (ej. 'CLP')
@@ -312,13 +313,32 @@ class MeliProvider(BaseOrderProvider):
         if area_code and not phone_str.startswith(area_code):
             phone_str = f"{area_code}{phone_str}"
 
+        # ── Nombre del destinatario ─────────────────────────────────────────
+        # Priorizar receiver_name de la dirección de envío (más confiable que buyer).
+        # El objeto buyer a veces contiene datos del titular de la cuenta, no del receptor.
+        receiver_name_raw = receiver.get("receiver_name", "").strip()
+        if receiver_name_raw:
+            name_parts = receiver_name_raw.split(" ", 1)
+            first_name = name_parts[0]
+            last_name  = name_parts[1] if len(name_parts) > 1 else ""
+        else:
+            first_name = buyer.get("first_name", "")
+            last_name  = buyer.get("last_name", "")
+
+        # ── RUT de facturación/envío ────────────────────────────────────────
+        billing_info = raw.get("billing_info") or {}
+        rut = (billing_info.get("doc_number") or "").strip()
+
+        # ── Estado logístico real del envío en MeLi ─────────────────────────
+        shipping_status = shipping_raw.get("status", "")
+
         street   = receiver.get("street_name", "")
         number   = str(receiver.get("street_number", "") or "")
         address1 = f"{street} {number}".strip()
 
         shipping_addr = ShippingAddress(
-            first_name=buyer.get("first_name", ""),
-            last_name=buyer.get("last_name", ""),
+            first_name=first_name,
+            last_name=last_name,
             address_1=address1,
             address_2=receiver.get("comment", "") or "",
             city=city_obj.get("name", "") if isinstance(city_obj, dict) else "",
@@ -368,11 +388,15 @@ class MeliProvider(BaseOrderProvider):
             currency=raw.get("currency_id", "CLP"),
             created_at=created_at,
             platform_meta={
-                "meli_status":    meli_status,
-                "shipping_id":    shipping_raw.get("id"),
-                "logistic_type":  shipping_raw.get("logistic_type", ""),
-                "buyer_nickname": buyer.get("nickname", ""),
-                "tags":           raw.get("tags", []),
+                "meli_status":     meli_status,
+                "shipping_id":     shipping_raw.get("id"),
+                "logistic_type":   shipping_raw.get("logistic_type", ""),
+                "buyer_nickname":  buyer.get("nickname", ""),
+                "tags":            raw.get("tags", []),
+                # Campos extendidos para el modal de detalle en el frontend
+                "shipping_status": shipping_status,   # Estado logístico real de MeLi
+                "rut":             rut,               # RUT de facturación/envío
+                "receiver_name":   receiver_name_raw, # Nombre completo del receptor
             },
         )
 

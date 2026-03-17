@@ -39,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders, save_meli_token
+from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders, get_preparing_orders, save_meli_token
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
 from providers.woo_client import WooCommerceProvider
@@ -243,7 +243,8 @@ async def spa(request: Request):
 @app.get("/api/orders", tags=["orders"])
 async def list_orders():
     """
-    Agrega pedidos 'processing' de todos los proveedores configurados.
+    Agrega pedidos 'processing' de todos los proveedores configurados, más
+    los pedidos WooCommerce en estado 'preparing' (hojas impresas recuperables).
     Errores parciales de un proveedor NO bloquean la respuesta global.
     """
     all_orders: List[dict] = []
@@ -262,6 +263,17 @@ async def list_orders():
         except Exception as exc:
             logger.error("Error al obtener pedidos de %s: %s", source, exc)
             errors.append({"source": source, "error": str(exc)})
+
+    # Incluir pedidos WooCommerce en estado PREPARING para recuperación de hojas.
+    # Permite al operario re-imprimir el PDF si la hoja se extravió en bodega.
+    try:
+        existing_ids = {o["id"] for o in all_orders}
+        preparing = await get_preparing_orders()
+        for o in preparing:
+            if o.id not in existing_ids:
+                all_orders.append(o.model_dump(mode="json"))
+    except Exception as exc:
+        logger.error("Error al obtener pedidos PREPARING para recuperación: %s", exc)
 
     return {
         "orders": all_orders,
@@ -448,7 +460,10 @@ async def bulk_meli_zpl(
             },
         )
 
-    combined_zpl = "\n".join(zpl_blocks)
+    # Concatenación con doble salto de línea entre bloques ZPL.
+    # Cada bloque es un documento completo ^XA ... ^XZ; el doble \n
+    # garantiza legibilidad al pegar en visores como Labelary.
+    combined_zpl = "\n\n".join(zpl_blocks)
 
     response_headers = {
         "Content-Disposition": 'attachment; filename="etiquetas_meli.txt"',

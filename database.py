@@ -148,6 +148,28 @@ async def log_event(order_id: str, source: str, event: str, detail: str = "") ->
         await db.commit()
 
 
+async def get_preparing_orders() -> List[NormalizedOrder]:
+    """
+    Devuelve los pedidos de WooCommerce en estado PREPARING desde la BD local.
+    Se usan en el dashboard para el filtro 'Ver hojas impresas (recuperar)',
+    permitiendo re-imprimir el PDF si la hoja se perdió en bodega.
+    """
+    results: List[NormalizedOrder] = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT payload_json FROM orders "
+            "WHERE status = 'preparing' AND source = 'woocommerce' "
+            "ORDER BY updated_at DESC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            results.append(NormalizedOrder.model_validate_json(row[0]))
+        except Exception as exc:
+            logger.warning("No se pudo deserializar pedido PREPARING para recuperación: %s", exc)
+    return results
+
+
 async def get_completed_orders() -> List[NormalizedOrder]:
     """Devuelve todos los pedidos completados desde la BD local para reporte Excel."""
     results: List[NormalizedOrder] = []
