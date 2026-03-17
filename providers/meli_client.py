@@ -207,12 +207,19 @@ class MeliProvider(BaseOrderProvider):
         async def _enrich_order(raw: dict) -> Optional[dict]:
             """
             Enriquece una orden con datos de /shipments/{id} y /billing_info.
+            
+            La consulta es secuencial para respetar las políticas PII de MeLi:
+            1. Primero obtiene el shipment para conocer el estado real
+            2. Solo consulta billing_info si el envío NO está shipped/delivered/cancelled
+               (MeLi revoca acceso a datos PII una vez despachado)
+            
             Retorna el raw actualizado o None si hubo un error crítico.
             """
             order_id = raw.get("id")
             shipping_id = (raw.get("shipping") or {}).get("id")
-
-            # Enriquecer con datos del shipment (incluye estado real del envío)
+            
+            # Paso 1: Enriquecer con datos del shipment (incluye estado real del envío)
+            shipment_data = {}
             if shipping_id:
                 try:
                     shipment_data = await self._get(f"/shipments/{shipping_id}")
@@ -224,19 +231,30 @@ class MeliProvider(BaseOrderProvider):
                         order_id,
                         exc,
                     )
-
-            # Enriquecer con datos de facturación (RUT, etc.)
-            if order_id:
+            
+            # Paso 2: PII Guard — Solo consultar billing_info si el envío está activo
+            # MeLi revoca acceso a RUT/datos PII cuando el pedido está shipped/delivered/cancelled
+            shipment_status = shipment_data.get("status", "").lower()
+            pii_blocked_states = ("shipped", "delivered", "cancelled")
+            
+            if order_id and shipment_status not in pii_blocked_states:
                 try:
                     billing_data = await self._get(f"/orders/{order_id}/billing_info")
                     raw["billing_info"] = billing_data
                 except RuntimeError as exc:
-                    logger.warning(
-                        "MeLi: no se pudo enriquecer billing_info para pedido %s: %s",
-                        order_id,
-                        exc,
-                    )
-
+                    # 403 es esperado si el comprador no ingresó RUT o si MeLi bloqueó PII
+                    if "403" in str(exc):
+                        logger.debug(
+                            "MeLi: billing_info bloqueado para pedido %s (esperado: sin RUT o PII revocado)",
+                            order_id,
+                        )
+                    else:
+                        logger.warning(
+                            "MeLi: no se pudo enriquecer billing_info para pedido %s: %s",
+                            order_id,
+                            exc,
+                        )
+            
             return raw
 
         while True:
