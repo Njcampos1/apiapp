@@ -68,6 +68,7 @@ class NormalizedOrder(BaseModel):
     created_at:       datetime = Field(default_factory=datetime.utcnow)
     updated_at:       datetime = Field(default_factory=datetime.utcnow)
     completed_at:     Optional[datetime] = None
+    label_printed_at: Optional[datetime] = None  # Timestamp exacto de impresión de etiqueta
     # Metadatos opacos para round-trip a la plataforma original
     platform_meta:    Dict[str, Any] = Field(default_factory=dict)
 

@@ -86,28 +86,34 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
         completed_at_str = (
             order.completed_at.isoformat() if order.completed_at else ""
         )
+        # Timestamp exacto de cuándo se imprimió la etiqueta
+        label_printed_at_str = (
+            order.label_printed_at.isoformat() if order.label_printed_at else ""
+        )
 
         rows.append({
-            "Página":      order.source.value,
-            "Cliente":     order.shipping.full_name,
-            "Dirección":   order.shipping.full_address,
-            "Comuna":      ciudad,
-            "Factura":     order.platform_meta.get("invoice", ""),
-            "N° Pedido":   order.id,
-            "Valor":       order.total,
-            "Seguimiento": order.platform_meta.get("tracking_number", ""),
-            "Despacho":    _get_courier(ciudad, rm_comunas),
-            "Cobertor":    _qty_by_name(order, "cobertor"),
-            "Detergente":  _qty_by_name(order, "detergente"),
-            "Chocolate":   _qty_chocolate(order),
-            "Cafe":        _qty_cafe(order),
-            "marked_at":   completed_at_str,
+            "Página":           order.source.value,
+            "Cliente":          order.shipping.full_name,
+            "Dirección":        order.shipping.full_address,
+            "Comuna":           ciudad,
+            "Factura":          order.platform_meta.get("invoice", ""),
+            "N° Pedido":        order.id,
+            "Valor":            order.total,
+            "Seguimiento":      order.platform_meta.get("tracking_number", ""),
+            "Despacho":         _get_courier(ciudad, rm_comunas),
+            "Cobertor":         _qty_by_name(order, "cobertor"),
+            "Detergente":       _qty_by_name(order, "detergente"),
+            "Chocolate":        _qty_chocolate(order),
+            "Cafe":             _qty_cafe(order),
+            "Etiqueta_Impresa": label_printed_at_str,
+            "Completado":       completed_at_str,
         })
 
     df = pd.DataFrame(rows, columns=[
         "Página", "Cliente", "Dirección", "Comuna", "Factura",
         "N° Pedido", "Valor", "Seguimiento", "Despacho",
-        "Cobertor", "Detergente", "Chocolate", "Cafe", "marked_at",
+        "Cobertor", "Detergente", "Chocolate", "Cafe",
+        "Etiqueta_Impresa", "Completado",
     ])
 
     buffer = BytesIO()

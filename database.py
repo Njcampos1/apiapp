@@ -68,6 +68,14 @@ async def init_db() -> None:
         except aiosqlite.OperationalError:
             pass  # La columna ya existe
 
+        # Migración: añadir label_printed_at si la columna aún no existe
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN label_printed_at TEXT")
+            await db.commit()
+            logger.info("Columna label_printed_at añadida a orders")
+        except aiosqlite.OperationalError:
+            pass  # La columna ya existe
+
         # Migración: añadir seller_id a meli_tokens si la columna aún no existe
         try:
             await db.execute(
@@ -89,12 +97,13 @@ async def upsert_order(order: NormalizedOrder) -> None:
         order.completed_at = datetime.utcnow()
 
     completed_at = order.completed_at.isoformat() if order.completed_at else None
+    label_printed_at = order.label_printed_at.isoformat() if order.label_printed_at else None
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id, source) DO UPDATE SET
                 status       = CASE
                                    WHEN orders.status IN ('preparing', 'labeled', 'completed')
@@ -106,7 +115,10 @@ async def upsert_order(order: NormalizedOrder) -> None:
                 updated_at   = excluded.updated_at,
                 completed_at = CASE WHEN excluded.status = 'completed'
                                     THEN excluded.completed_at
-                                    ELSE orders.completed_at END
+                                    ELSE orders.completed_at END,
+                label_printed_at = CASE WHEN excluded.label_printed_at IS NOT NULL
+                                        THEN excluded.label_printed_at
+                                        ELSE orders.label_printed_at END
             """,
             (
                 order.id,
@@ -116,6 +128,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
                 now,
                 now,
                 completed_at,
+                label_printed_at,
             ),
         )
         await db.commit()

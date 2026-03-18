@@ -339,6 +339,82 @@ class MeliProvider(BaseOrderProvider):
         logger.debug("MeLi: %d pedidos obtenidos", len(normalized))
         return normalized
 
+    async def get_full_orders(self) -> List[NormalizedOrder]:
+        """
+        Devuelve pedidos Full (fulfillment) de los últimos 30 días, solo con
+        fines informativos. Estos pedidos NO se preparan en bodega ya que
+        Mercado Libre los gestiona directamente.
+
+        Los campos de billing_info pueden estar bloqueados por PII si el
+        pedido ya fue despachado por MeLi.
+        """
+        seller_id = await self._resolve_seller_id()
+        normalized: List[NormalizedOrder] = []
+        limit  = 50
+        offset = 0
+
+        # Ventana de 30 días
+        from_date = (
+            datetime.now(timezone.utc) - timedelta(days=30)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+
+        while True:
+            try:
+                data = await self._get(
+                    "/orders/search",
+                    params={
+                        "seller":                 seller_id,
+                        "order.status":           "paid",
+                        "order.date_created.from": from_date,
+                        "tags":                   "not_delivered",
+                        "sort":                   "date_asc",
+                        "limit":                  limit,
+                        "offset":                 offset,
+                    },
+                )
+            except RuntimeError:
+                raise
+
+            results = data.get("results", [])
+
+            # Filtrar SOLO pedidos Full
+            for raw in results:
+                logistic_type = (raw.get("shipping") or {}).get("logistic_type", "")
+                if logistic_type != "fulfillment":
+                    continue
+
+                # Enriquecer con shipment info (sin billing_info por PII)
+                shipping_id = (raw.get("shipping") or {}).get("id")
+                if shipping_id:
+                    try:
+                        shipment_data = await self._get(f"/shipments/{shipping_id}")
+                        raw["shipping"].update(shipment_data)
+                    except RuntimeError as exc:
+                        logger.warning(
+                            "MeLi: no se pudo enriquecer /shipments/%s para pedido Full %s: %s",
+                            shipping_id,
+                            raw.get("id"),
+                            exc,
+                        )
+
+                try:
+                    order = self.normalize(raw)
+                    normalized.append(order)
+                except Exception as exc:
+                    logger.warning(
+                        "MeLi: no se pudo normalizar pedido Full %s: %s",
+                        raw.get("id"),
+                        exc,
+                    )
+
+            paging = data.get("paging", {})
+            offset += len(results)
+            if not results or offset >= paging.get("total", 0):
+                break
+
+        logger.debug("MeLi: %d pedidos Full obtenidos", len(normalized))
+        return normalized
+
     async def get_order(self, order_id: str) -> Optional[NormalizedOrder]:
         try:
             data = await self._get(f"/orders/{order_id}")
@@ -423,8 +499,16 @@ class MeliProvider(BaseOrderProvider):
         country_obj   = receiver.get("country") or {}
 
         buyer      = raw.get("buyer") or {}
-        # Teléfono: priorizar receiver_address (más fiable en resultados de búsqueda)
-        # ya que buyer.phone suele llegar vacío en /orders/search.
+        # ── Teléfono ────────────────────────────────────────────────────────
+        # IMPORTANTE sobre teléfonos en MeLi:
+        # - receiver_address.phone es más confiable que buyer.phone
+        # - buyer.phone suele llegar vacío en /orders/search (pero sí en /orders/{id})
+        # - MeLi puede ocultar dígitos centrales por privacidad (ej: "9XXXX1234")
+        # - El formato es: {area_code: "9", number: "12345678"}
+        #
+        # Estrategia:
+        # 1. Priorizar receiver_address.phone (dirección de envío real)
+        # 2. Fallback a buyer.phone (titular de cuenta, menos fiable)
         phone_str  = ""
         rec_phone  = receiver.get("phone") or {}
         if isinstance(rec_phone, dict) and rec_phone.get("number"):
@@ -453,7 +537,21 @@ class MeliProvider(BaseOrderProvider):
             last_name  = buyer.get("last_name", "")
 
         # ── RUT de facturación/envío ────────────────────────────────────────
-        # Intentar en billing_info de nivel raíz y luego en buyer.billing_info
+        # IMPORTANTE sobre datos PII de MeLi:
+        # - Mercado Libre REVOCA el acceso a datos PII (RUT, teléfono completo, nombre)
+        #   una vez que el pedido está en estado shipped/delivered/cancelled
+        # - billing_info solo está disponible si:
+        #   1. El comprador ingresó RUT al hacer el pedido (no es obligatorio)
+        #   2. El envío NO está en estados shipped/delivered/cancelled
+        # - get_pending_orders() ya aplica este filtro en línea 240 (PII Guard)
+        # - Si el RUT llega vacío aquí, significa que:
+        #   a) El comprador no lo ingresó, o
+        #   b) MeLi ya bloqueó el acceso por estado del envío
+        #
+        # Estrategia de extracción:
+        # - Priorizar billing_info de nivel raíz (endpoint /orders/{id}/billing_info)
+        # - Fallback a buyer.billing_info (menos confiable, puede ser del titular de cuenta)
+        # - Manejar caso de billing_info como array (formato antiguo de MeLi)
         billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
         rut = (billing_info.get("doc_number") or "").strip()
         # Segundo fallback: dentro del array billing_info si viene como lista

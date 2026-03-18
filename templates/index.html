@@ -152,6 +152,10 @@
       class="filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all">
       Mercado Libre
     </button>
+    <button onclick="setFilter('meli-full')" id="pill-meli-full"
+      class="filter-pill px-3 py-1 rounded-full text-xs transition-all text-emerald-600 border border-emerald-200 hover:bg-emerald-50">
+      ⚡ Full (info)
+    </button>
     <!-- Enlace discreto para recuperar hojas WooCommerce ya impresas -->
     <button onclick="setFilter('preparing')" id="pill-preparing"
       class="filter-pill ml-auto px-3 py-1 rounded-full text-xs transition-all text-coffee-500 border border-coffee-200 hover:bg-coffee-100">
@@ -376,8 +380,9 @@
 
   // ── Estado del dashboard ──────────────────────────────────────
   let allOrders     = [];   // Todos los pedidos recibidos de la API
-  let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'preparing'
+  let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'meli-full' | 'preparing'
   let _orderCache   = {};   // Cache de objetos de pedido para el modal MeLi: "source:id" → order
+  let fullOrders    = [];   // Cache de pedidos Full de MeLi (solo informativo)
 
   const SOURCE_ICONS = {
     woocommerce: {
@@ -466,11 +471,18 @@
   function setFilter(filter) {
     currentFilter = filter;
 
+    // Cargar pedidos Full si se selecciona ese filtro y aún no están en cache
+    if (filter === 'meli-full' && fullOrders.length === 0) {
+      loadFullOrders();
+      return; // loadFullOrders llamará a renderOrders cuando termine
+    }
+
     // Estilos de pills: activo vs inactivo
     const pills = {
       all:           document.getElementById('pill-all'),
       woocommerce:   document.getElementById('pill-woocommerce'),
       mercadolibre:  document.getElementById('pill-mercadolibre'),
+      'meli-full':   document.getElementById('pill-meli-full'),
       preparing:     document.getElementById('pill-preparing'),
     };
     const activeClass   = 'bg-coffee-900 text-white shadow-md';
@@ -478,11 +490,16 @@
     // Estilo especial para el pill de recuperación
     const preparingActive   = 'bg-orange-500 text-white shadow-md';
     const preparingInactive = 'ml-auto px-3 py-1 rounded-full text-xs transition-all text-coffee-500 border border-coffee-200 hover:bg-coffee-100';
+    // Estilo especial para el pill de Full
+    const fullActive   = 'bg-emerald-500 text-white shadow-md px-3 py-1 rounded-full text-xs transition-all';
+    const fullInactive = 'px-3 py-1 rounded-full text-xs transition-all text-emerald-600 border border-emerald-200 hover:bg-emerald-50';
 
     Object.entries(pills).forEach(([key, el]) => {
       if (!el) return;
       if (key === 'preparing') {
         el.className = `filter-pill ${filter === 'preparing' ? preparingActive + ' ml-auto px-3 py-1 rounded-full text-xs transition-all' : preparingInactive}`;
+      } else if (key === 'meli-full') {
+        el.className = `filter-pill ${filter === 'meli-full' ? fullActive : fullInactive}`;
       } else {
         el.className = `filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all ${
           key === filter ? activeClass : inactiveClass
@@ -502,14 +519,26 @@
 
     let filtered;
     if (currentFilter === 'mercadolibre') {
-      // La pestaña MeLi muestra TODOS sus pedidos, incluidos los completados
-      filtered = allOrders.filter(o => o.source === 'mercadolibre');
+      // La pestaña MeLi muestra pedidos pendientes y listos para enviar (ready_to_ship)
+      // pero excluye los que ya fueron despachados (shipped/delivered/dropped_off)
+      filtered = allOrders.filter(o => {
+        if (o.source !== 'mercadolibre') return false;
+
+        const shippingStatus = (o.platform_meta || {}).shipping_status;
+        const blockedStates = ['shipped', 'delivered', 'dropped_off'];
+
+        // Excluir pedidos ya despachados
+        return !blockedStates.includes(shippingStatus);
+      });
       // Pendientes primero, completados al final
       filtered.sort((a, b) => {
         const aDone = a.status === 'completed' ? 1 : 0;
         const bDone = b.status === 'completed' ? 1 : 0;
         return aDone - bDone;
       });
+    } else if (currentFilter === 'meli-full') {
+      // Pestaña de pedidos Full: solo informativo, sin acciones
+      filtered = fullOrders;
     } else if (currentFilter === 'woocommerce') {
       filtered = allOrders.filter(o => o.source === 'woocommerce' && o.status !== 'preparing' && o.status !== 'labeled');
     } else if (currentFilter === 'preparing') {
@@ -521,6 +550,7 @@
     }
 
     const inMeliFilter     = currentFilter === 'mercadolibre';
+    const inFullFilter     = currentFilter === 'meli-full';
     const inPreparingFilter = currentFilter === 'preparing';
 
     // Mostrar/ocultar barra de selección MeLi
@@ -537,6 +567,8 @@
     const pendingCount = filtered.filter(o => o.status !== 'completed').length;
     if (inMeliFilter) {
       count.textContent = `${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''} · ${filtered.length - pendingCount} ya generado${filtered.length - pendingCount !== 1 ? 's' : ''}`;
+    } else if (inFullFilter) {
+      count.textContent = `${filtered.length} pedido${filtered.length !== 1 ? 's' : ''} Full (solo info)`;
     } else if (inPreparingFilter) {
       count.textContent = `${filtered.length} hoja${filtered.length !== 1 ? 's' : ''} impresa${filtered.length !== 1 ? 's' : ''} (recuperables)`;
     } else {
@@ -597,6 +629,41 @@
       icon.classList.remove('spinner');
       document.getElementById('order-count').textContent = '—';
       toast('Error de conexión al servidor', 'error');
+    }
+  }
+
+  // ── Dashboard — carga de pedidos Full (solo informativo) ──────────
+  async function loadFullOrders() {
+    const grid    = document.getElementById('orders-grid');
+    const loading = document.getElementById('orders-loading');
+    const empty   = document.getElementById('empty-state');
+    const icon    = document.getElementById('refresh-icon');
+    const errBox  = document.getElementById('api-errors');
+
+    grid.classList.add('hidden');
+    empty.classList.add('hidden');
+    errBox.classList.add('hidden');
+    loading.classList.remove('hidden');
+    icon.classList.add('spinner');
+
+    try {
+      const r = await fetch('/api/orders/meli/full');
+      const d = await r.json();
+
+      loading.classList.add('hidden');
+      icon.classList.remove('spinner');
+
+      // Guardar pedidos Full en el cache global
+      fullOrders = d.orders || [];
+      renderOrders();
+
+    } catch (err) {
+      loading.classList.add('hidden');
+      icon.classList.remove('spinner');
+      document.getElementById('order-count').textContent = '—';
+      toast('Error al cargar pedidos Full de MeLi', 'error');
+      // Volver al filtro "all" si falla la carga
+      setFilter('all');
     }
   }
 
@@ -1163,6 +1230,17 @@
     document.getElementById('modal-phone').textContent       = ship.phone || '—';
     document.getElementById('modal-shipping-status').textContent = meta.shipping_status || '—';
 
+    // Mostrar nota del cliente si existe
+    const customerNote = (order.customer_note || '').trim();
+    const noteSection = document.getElementById('modal-customer-note-section');
+    const noteElement = document.getElementById('modal-customer-note');
+    if (customerNote) {
+      noteElement.textContent = customerNote;
+      noteSection.classList.remove('hidden');
+    } else {
+      noteSection.classList.add('hidden');
+    }
+
     const itemsHtml = (order.items || []).map(item => `
       <tr class="border-b border-coffee-100 last:border-0">
         <td class="py-2 pr-3 font-mono text-xs text-coffee-500">${item.sku || '—'}</td>
@@ -1496,6 +1574,14 @@
             <p class="text-xs text-coffee-400">Teléfono</p>
             <p id="modal-phone" class="font-semibold text-coffee-900 text-sm mt-0.5"></p>
           </div>
+        </div>
+      </div>
+
+      <!-- Nota del cliente -->
+      <div id="modal-customer-note-section" class="hidden">
+        <h3 class="text-xs font-bold text-coffee-400 uppercase tracking-wider mb-2">Nota del cliente</h3>
+        <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+          <p id="modal-customer-note" class="text-sm text-blue-900 whitespace-pre-wrap break-words"></p>
         </div>
       </div>
 
