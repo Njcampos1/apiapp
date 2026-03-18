@@ -1106,13 +1106,6 @@
     }
   }
 
-    if (countEl) {
-      countEl.textContent = checked.length > 0
-        ? `${checked.length} seleccionado${checked.length !== 1 ? 's' : ''}`
-        : '';
-    }
-  }
-
   /** Selecciona o deselecciona todos los checkboxes MeLi habilitados */
   function toggleAllMeli(checked) {
     document.querySelectorAll('.meli-checkbox:not([disabled])').forEach(cb => {
