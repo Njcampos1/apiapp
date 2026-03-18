@@ -378,7 +378,7 @@ class MeliProvider(BaseOrderProvider):
             if results:
                 try:
                     enriched_orders = await asyncio.gather(
-                        *[_enrich_order(raw) for raw in results],
+                        *[self._enrich_order(raw) for raw in results],
                         return_exceptions=True
                     )
 
