@@ -503,6 +503,100 @@ async def bulk_meli_zpl(
     )
 
 
+# ── Mercado Libre — Descarga masiva PDF picking ──────────────────
+@app.get("/api/orders/meli/bulk-pdf", tags=["meli"])
+async def bulk_meli_pdf(
+    ids: str = Query(
+        ...,
+        description="IDs de pedidos MeLi separados por coma, ej: 123456789,987654321",
+    ),
+):
+    """
+    Descarga un único PDF multipágina con las hojas de picking de los pedidos
+    de Mercado Libre indicados.
+
+    Comportamiento:
+    - Consulta cada pedido desde la API de MeLi.
+    - Genera un PDF multipágina con la hoja de picking de cada pedido.
+    - Si un ID falla, se omite del PDF y el endpoint continúa con los demás.
+    - Solo lanza error 502 si NINGÚN ID pudo procesarse correctamente.
+
+    El archivo descargado contiene todas las hojas en un solo documento.
+    """
+    provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+    if provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El proveedor MercadoLibre no está activo. "
+                "Verifica que MELI_APP_ID y MELI_CLIENT_SECRET estén configurados."
+            ),
+        )
+    meli: MeliProvider = provider  # type: ignore[assignment]
+
+    order_ids = [oid.strip() for oid in ids.split(",") if oid.strip()]
+    if not order_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Debes proporcionar al menos un ID de pedido en el parámetro ?ids=",
+        )
+
+    orders: List[NormalizedOrder] = []
+    failed: List[dict] = []
+
+    for order_id in order_ids:
+        try:
+            order = await meli.get_order(order_id)
+            if not order:
+                raise RuntimeError(f"Pedido {order_id} no encontrado")
+            orders.append(order)
+            logger.info("MeLi bulk-pdf: pedido %s obtenido OK", order_id)
+        except Exception as exc:
+            logger.error(
+                "MeLi bulk-pdf: error al obtener pedido %s — %s", order_id, exc
+            )
+            failed.append({"order_id": order_id, "error": str(exc)})
+
+    if not orders:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "No se pudo obtener ninguno de los pedidos indicados.",
+                "failed": failed,
+            },
+        )
+
+    # Generar PDF multipágina
+    try:
+        pdf_bytes = generate_bulk_picking_pdf(orders)
+    except Exception as exc:
+        logger.exception("Error generando PDF masivo de picking para MeLi (%d pedidos)", len(orders))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando PDF masivo: {exc}"
+        )
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="picking_meli_masivo_{ts}.pdf"',
+        "X-Orders-Count": str(len(orders)),
+        "X-Failed-Count": str(len(failed)),
+    }
+    if failed:
+        response_headers["X-Failed-Ids"] = ",".join(f["order_id"] for f in failed)
+
+    logger.info(
+        "MeLi bulk-pdf: %d hojas generadas, %d fallidos",
+        len(orders),
+        len(failed),
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers=response_headers,
+    )
+
+
 # ── Mercado Libre — Pedidos Full (informativos) ──────────────────
 @app.get("/api/orders/meli/full", tags=["meli"])
 async def list_full_orders():
@@ -549,6 +643,8 @@ async def download_zpl(
 ):
     """
     Genera y descarga la etiqueta ZPL como archivo .txt.
+    - Para MercadoLibre: obtiene el ZPL nativo de la API
+    - Para WooCommerce: genera el ZPL localmente
     Vía de contingencia cuando la impresora no está disponible.
     """
     provider = get_provider(source)
@@ -560,7 +656,20 @@ async def download_zpl(
     if not order:
         raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
 
-    zpl_str = build_zpl(order, dpi=settings.ZEBRA_DPI)
+    # Para MercadoLibre: usar ZPL nativo; para otros: generar localmente
+    if source == OrderSource.MERCADOLIBRE.value:
+        meli: MeliProvider = provider  # type: ignore[assignment]
+        try:
+            zpl_str = await meli.get_native_zpl(order_id)
+        except Exception as exc:
+            logger.error("Error obteniendo ZPL nativo de MeLi para pedido %s: %s", order_id, exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"No se pudo obtener la etiqueta nativa de MercadoLibre: {exc}"
+            )
+    else:
+        zpl_str = build_zpl(order, dpi=settings.ZEBRA_DPI)
+
     await log_event(order_id, source, "zpl_download", "ZPL descargado manualmente para impresión de contingencia")
 
     return Response(

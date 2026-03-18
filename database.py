@@ -113,9 +113,15 @@ async def upsert_order(order: NormalizedOrder) -> None:
                                END,
                 payload_json = excluded.payload_json,
                 updated_at   = excluded.updated_at,
-                completed_at = CASE WHEN excluded.status = 'completed'
-                                    THEN excluded.completed_at
-                                    ELSE orders.completed_at END,
+                completed_at = CASE
+                                   -- Preservar el completed_at existente si ya hay uno en BD
+                                   WHEN orders.completed_at IS NOT NULL
+                                   THEN orders.completed_at
+                                   -- Solo actualizar si el nuevo valor no es NULL
+                                   WHEN excluded.completed_at IS NOT NULL
+                                   THEN excluded.completed_at
+                                   ELSE orders.completed_at
+                               END,
                 label_printed_at = CASE WHEN excluded.label_printed_at IS NOT NULL
                                         THEN excluded.label_printed_at
                                         ELSE orders.label_printed_at END

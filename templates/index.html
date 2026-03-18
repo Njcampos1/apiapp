@@ -86,8 +86,8 @@
 
 <div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-<!-- ── Botón flotante descarga masiva MeLi ─────────────────────── -->
-<div id="bulk-download-btn" class="hidden fixed bottom-6 right-6 z-40 animate-slide-in">
+<!-- ── Botón flotante descarga masiva ZPL MeLi ──────────────────── -->
+<div id="bulk-download-zpl-btn" class="hidden fixed bottom-20 right-6 z-40 animate-slide-in">
   <button onclick="downloadBulkMeliZpl()"
     class="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 px-6 rounded-2xl shadow-xl transition-all text-base">
     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -97,6 +97,21 @@
     Descargar etiquetas seleccionadas
     <span id="bulk-count-badge"
       class="bg-yellow-900 text-yellow-100 text-xs font-black rounded-full px-2 py-0.5 min-w-[1.25rem] text-center">
+    </span>
+  </button>
+</div>
+
+<!-- ── Botón flotante descarga masiva PDF MeLi ───────────────────── -->
+<div id="bulk-download-pdf-btn" class="hidden fixed bottom-6 right-6 z-40 animate-slide-in">
+  <button onclick="downloadBulkMeliPdf()"
+    class="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-3.5 px-6 rounded-2xl shadow-xl transition-all text-base">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+    </svg>
+    Descargar hojas de picking seleccionadas
+    <span id="bulk-pdf-count-badge"
+      class="bg-blue-900 text-blue-100 text-xs font-black rounded-full px-2 py-0.5 min-w-[1.25rem] text-center">
     </span>
   </button>
 </div>
@@ -888,29 +903,28 @@
            🚚 Ya despachado
          </button>`;
     } else if (isMeli && isCompleted) {
-      // MeLi completado: mostrar "Ver detalle" + "Re-descargar ZPL"
+      // MeLi completado: mostrar "Ver detalle" + "Hoja de Picking (PDF)"
       showBothButtons = true;
       actionBtn = `<button
-           onclick="downloadSingleZpl('${order.source}', '${order.id}')"
-           class="flex-1 bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           onclick="downloadSinglePdf('${order.source}', '${order.id}')"
+           class="flex-1 bg-blue-500 hover:bg-blue-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-               d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
            </svg>
-           Re-descargar ZPL
+           Hoja de Picking
          </button>`;
     } else if (isMeli) {
-      // MeLi pendiente: solo "Ver detalle" con el botón principal
+      // MeLi pendiente: mostrar "Ver detalle" + "Hoja de Picking"
+      showBothButtons = true;
       actionBtn = `<button
-           onclick="openMeliDetailModal('${order.source}', '${order.id}')"
-           class="w-full bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           onclick="downloadSinglePdf('${order.source}', '${order.id}')"
+           class="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-               d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
            </svg>
-           Ver detalle
+           Hoja de Picking
          </button>`;
     } else if (isPreparing) {
       // WooCommerce en preparing: solo "Re-imprimir hoja"
@@ -1048,16 +1062,20 @@
   function updateBulkButton() {
     const checkboxes = document.querySelectorAll('.meli-checkbox:not([disabled])');
     const checked    = document.querySelectorAll('.meli-checkbox:not([disabled]):checked');
-    const btn        = document.getElementById('bulk-download-btn');
+    const zplBtn     = document.getElementById('bulk-download-zpl-btn');
+    const pdfBtn     = document.getElementById('bulk-download-pdf-btn');
     const badge      = document.getElementById('bulk-count-badge');
-    const countEl    = document.getElementById('meli-selected-count');
+    const pdfBadge   = document.getElementById('bulk-pdf-count-badge');
     const selectAll  = document.getElementById('select-all-meli');
 
     if (currentFilter === 'mercadolibre' && checked.length > 0) {
-      btn.classList.remove('hidden');
+      zplBtn.classList.remove('hidden');
+      pdfBtn.classList.remove('hidden');
       badge.textContent = checked.length;
+      pdfBadge.textContent = checked.length;
     } else {
-      btn.classList.add('hidden');
+      zplBtn.classList.add('hidden');
+      pdfBtn.classList.add('hidden');
     }
 
     // Estado indeterminado del select-all
@@ -1076,6 +1094,17 @@
         selectAll.indeterminate = true;
       }
     }
+
+    // Contador de selección en la barra
+    const barCount = document.getElementById('meli-selected-count');
+    if (barCount) {
+      if (currentFilter === 'mercadolibre' && checked.length > 0) {
+        barCount.textContent = `${checked.length} seleccionado${checked.length !== 1 ? 's' : ''}`;
+      } else {
+        barCount.textContent = '';
+      }
+    }
+  }
 
     if (countEl) {
       countEl.textContent = checked.length > 0
@@ -1099,7 +1128,7 @@
 
     if (ids.length === 0) return;
 
-    const bulkBtn = document.getElementById('bulk-download-btn').querySelector('button');
+    const bulkBtn = document.getElementById('bulk-download-zpl-btn').querySelector('button');
     bulkBtn.disabled = true;
 
     try {
@@ -1152,6 +1181,59 @@
     }
   }
 
+  /** Descarga PDFs masivos para los pedidos MeLi seleccionados */
+  async function downloadBulkMeliPdf() {
+    const checked = document.querySelectorAll('.meli-checkbox:not([disabled]):checked');
+    const ids = Array.from(checked).map(cb => cb.value);
+
+    if (ids.length === 0) return;
+
+    const bulkBtn = document.getElementById('bulk-download-pdf-btn').querySelector('button');
+    bulkBtn.disabled = true;
+
+    try {
+      const url = `/api/orders/meli/bulk-pdf?ids=${ids.join(',')}`;
+      const r   = await fetch(url);
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        let msg = (err.detail && typeof err.detail === 'object')
+          ? err.detail.message
+          : (err.detail || r.statusText);
+        if (err.detail && Array.isArray(err.detail.failed) && err.detail.failed.length > 0) {
+          msg += '\nDetalle: ' + err.detail.failed.map(f => f.error).join(' | ');
+        }
+        toast(`Error: ${msg}`, 'error');
+        return;
+      }
+
+      const ordersCount = r.headers.get('X-Orders-Count') || ids.length;
+      const failedCount = parseInt(r.headers.get('X-Failed-Count') || '0', 10);
+
+      const blob   = await r.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a      = document.createElement('a');
+      a.href       = blobUrl;
+      a.download   = 'picking_meli_masivo.pdf';
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+
+      toast(
+        `${ordersCount} hoja${ordersCount != 1 ? 's' : ''} de picking descargada${ordersCount != 1 ? 's' : ''}` +
+        (failedCount > 0 ? ` · ${failedCount} fallido${failedCount !== 1 ? 's' : ''}` : ''),
+        failedCount > 0 ? 'warn' : 'success'
+      );
+
+      // Refrescar la vista
+      renderOrders();
+
+    } catch {
+      toast('Error de conexión', 'error');
+    } finally {
+      bulkBtn.disabled = false;
+    }
+  }
+
   /** Descarga ZPL individual para reimpresión */
   async function downloadSingleZpl(source, id) {
     try {
@@ -1176,6 +1258,38 @@
       URL.revokeObjectURL(blobUrl);
 
       toast('Etiqueta ZPL descargada correctamente', 'success');
+
+      // Refrescar pedidos para actualizar el estado si cambió
+      await loadOrders();
+    } catch (err) {
+      toast(`Error: ${err.message}`, 'error');
+    }
+  }
+
+  /** Descarga hoja de picking (PDF) de un solo pedido */
+  async function downloadSinglePdf(source, id) {
+    try {
+      const url = `/api/orders/${id}/prepare?source=${source}`;
+      const r = await fetch(url, { method: 'POST' });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        const msg = (err.detail && typeof err.detail === 'object')
+          ? err.detail.message
+          : (err.detail || r.statusText);
+        toast(`Error al generar PDF: ${msg}`, 'error');
+        return;
+      }
+
+      const blob = await r.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `picking_${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+
+      toast('Hoja de picking descargada correctamente', 'success');
 
       // Refrescar pedidos para actualizar el estado si cambió
       await loadOrders();

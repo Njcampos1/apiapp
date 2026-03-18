@@ -177,6 +177,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     Devuelve los bytes del archivo listo para enviar como respuesta HTTP.
 
     NOTA: Excluye pedidos Full (fulfillment) ya que no se preparan en bodega.
+    Los pedidos se ordenan por fecha de impresión de etiqueta (label_printed_at).
     """
     rm_comunas = _load_rm_comunas()
     sku_multipliers, unit_skus = _load_sku_data()
@@ -191,13 +192,13 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             continue
 
         ciudad = order.shipping.city
-        completed_at_str = (
-            order.completed_at.isoformat() if order.completed_at else ""
-        )
-        # Timestamp exacto de cuándo se imprimió la etiqueta
-        label_printed_at_str = (
-            order.label_printed_at.isoformat() if order.label_printed_at else ""
-        )
+
+        # Usamos prioritariamente label_printed_at, fallback a completed_at
+        fecha_etiqueta_str = ""
+        if order.label_printed_at:
+            fecha_etiqueta_str = order.label_printed_at.isoformat()
+        elif order.completed_at:
+            fecha_etiqueta_str = order.completed_at.isoformat()
 
         rows.append({
             "Página":           order.source.value,
@@ -213,16 +214,21 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Detergente":       _qty_by_name(order, "detergente"),
             "Chocolate":        _qty_chocolate(order, sku_multipliers, unit_skus),
             "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus),
-            "Etiqueta_Impresa": label_printed_at_str,
-            "Completado":       completed_at_str,
+            "Fecha_Etiqueta":   fecha_etiqueta_str,
         })
 
     df = pd.DataFrame(rows, columns=[
         "Página", "Cliente", "Dirección", "Comuna", "Factura",
         "N° Pedido", "Valor", "Seguimiento", "Despacho",
         "Cobertor", "Detergente", "Chocolate", "Cafe",
-        "Etiqueta_Impresa", "Completado",
+        "Fecha_Etiqueta",
     ])
+
+    # Ordenar por fecha de etiqueta (de más antiguo a más reciente)
+    # Los pedidos sin fecha irán al final
+    df["_sort_key"] = pd.to_datetime(df["Fecha_Etiqueta"], errors="coerce")
+    df = df.sort_values("_sort_key", na_position="last")
+    df = df.drop(columns=["_sort_key"])
 
     buffer = BytesIO()
     df.to_excel(buffer, index=False, engine="openpyxl")
