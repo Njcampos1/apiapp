@@ -276,23 +276,11 @@ class MeliProvider(BaseOrderProvider):
 
             results = data.get("results", [])
 
-            # Filtrar pedidos Full antes de enriquecer (no vale la pena el overhead)
-            filtered_results = []
-            for raw in results:
-                logistic_type = (raw.get("shipping") or {}).get("logistic_type", "")
-                if logistic_type == "fulfillment":
-                    logger.debug(
-                        "MeLi: pedido %s omitido (Full/fulfillment)",
-                        raw.get("id"),
-                    )
-                    continue
-                filtered_results.append(raw)
-
             # Enriquecer todas las órdenes en paralelo con asyncio.gather
-            if filtered_results:
+            if results:
                 try:
                     enriched_orders = await asyncio.gather(
-                        *[_enrich_order(raw) for raw in filtered_results],
+                        *[_enrich_order(raw) for raw in results],
                         return_exceptions=True  # No romper si una falla
                     )
 
@@ -308,6 +296,15 @@ class MeliProvider(BaseOrderProvider):
 
                         try:
                             order = self.normalize(enriched)
+
+                            # FILTRO: Excluir pedidos Full (ya enriquecidos)
+                            logistic_type = (enriched.get("shipping") or {}).get("logistic_type", "")
+                            if logistic_type == "fulfillment":
+                                logger.debug(
+                                    "MeLi: pedido %s omitido (Full/fulfillment)",
+                                    enriched.get("id"),
+                                )
+                                continue
 
                             # Mapeo de estado inteligente: si el envío ya fue despachado,
                             # entregado o cancelado, forzar el estado interno para que
@@ -377,35 +374,44 @@ class MeliProvider(BaseOrderProvider):
 
             results = data.get("results", [])
 
-            # Filtrar SOLO pedidos Full
-            for raw in results:
-                logistic_type = (raw.get("shipping") or {}).get("logistic_type", "")
-                if logistic_type != "fulfillment":
-                    continue
-
-                # Enriquecer con shipment info (sin billing_info por PII)
-                shipping_id = (raw.get("shipping") or {}).get("id")
-                if shipping_id:
-                    try:
-                        shipment_data = await self._get(f"/shipments/{shipping_id}")
-                        raw["shipping"].update(shipment_data)
-                    except RuntimeError as exc:
-                        logger.warning(
-                            "MeLi: no se pudo enriquecer /shipments/%s para pedido Full %s: %s",
-                            shipping_id,
-                            raw.get("id"),
-                            exc,
-                        )
-
+            # Enriquecer todas las órdenes en paralelo con asyncio.gather
+            if results:
                 try:
-                    order = self.normalize(raw)
-                    normalized.append(order)
-                except Exception as exc:
-                    logger.warning(
-                        "MeLi: no se pudo normalizar pedido Full %s: %s",
-                        raw.get("id"),
-                        exc,
+                    enriched_orders = await asyncio.gather(
+                        *[_enrich_order(raw) for raw in results],
+                        return_exceptions=True
                     )
+
+                    # Filtrar SOLO pedidos Full (después del enriquecimiento)
+                    for enriched in enriched_orders:
+                        if enriched is None or isinstance(enriched, Exception):
+                            logger.warning(
+                                "MeLi: error al enriquecer orden Full: %s",
+                                enriched if isinstance(enriched, Exception) else "resultado None",
+                            )
+                            continue
+
+                        # Verificar que sea fulfillment DESPUÉS de enriquecer
+                        logistic_type = (enriched.get("shipping") or {}).get("logistic_type", "")
+                        if logistic_type != "fulfillment":
+                            logger.debug(
+                                "MeLi: pedido %s omitido en get_full_orders (no es Full)",
+                                enriched.get("id"),
+                            )
+                            continue
+
+                        try:
+                            order = self.normalize(enriched)
+                            normalized.append(order)
+                        except Exception as exc:
+                            logger.warning(
+                                "MeLi: no se pudo normalizar pedido Full %s: %s",
+                                enriched.get("id"),
+                                exc,
+                            )
+
+                except Exception as exc:
+                    logger.error("MeLi: error en asyncio.gather durante enriquecimiento Full: %s", exc)
 
             paging = data.get("paging", {})
             offset += len(results)

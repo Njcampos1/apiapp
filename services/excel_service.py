@@ -53,8 +53,18 @@ def _load_rm_comunas() -> frozenset[str]:
     return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
-def _get_courier(ciudad: str, rm_comunas: frozenset[str]) -> str:
-    return "Rocket" if _normalize_text(ciudad.strip()) in rm_comunas else "Chilexpress"
+def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
+    """
+    Determina el courier según la ciudad y el origen del pedido.
+    - WooCommerce: RM → 'Rocket' | Región → 'Chilexpress'
+    - Mercado Libre: RM → 'Rocket' | Región → 'Mercado'
+    """
+    is_rm = _normalize_text(ciudad.strip()) in rm_comunas
+
+    if source.lower() == "woocommerce":
+        return "Rocket" if is_rm else "Chilexpress"
+    else:  # Mercado Libre
+        return "Rocket" if is_rm else "Mercado"
 
 
 def _qty_chocolate(order: NormalizedOrder) -> int:
@@ -77,11 +87,20 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     """
     Genera un archivo .xlsx a partir de una lista de pedidos normalizados.
     Devuelve los bytes del archivo listo para enviar como respuesta HTTP.
+
+    NOTA: Excluye pedidos Full (fulfillment) ya que no se preparan en bodega.
     """
     rm_comunas = _load_rm_comunas()
     rows = []
 
     for order in orders:
+        # FILTRO: Excluir pedidos Full completamente del Excel
+        logistic_type = order.platform_meta.get("logistic_type", "")
+        logistic_label = order.platform_meta.get("logistic_label", "")
+
+        if logistic_type == "fulfillment" or logistic_label == "Full":
+            continue
+
         ciudad = order.shipping.city
         completed_at_str = (
             order.completed_at.isoformat() if order.completed_at else ""
@@ -100,7 +119,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "N° Pedido":        order.id,
             "Valor":            order.total,
             "Seguimiento":      order.platform_meta.get("tracking_number", ""),
-            "Despacho":         _get_courier(ciudad, rm_comunas),
+            "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),
             "Cobertor":         _qty_by_name(order, "cobertor"),
             "Detergente":       _qty_by_name(order, "detergente"),
             "Chocolate":        _qty_chocolate(order),

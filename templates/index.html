@@ -1225,7 +1225,7 @@
     document.getElementById('modal-order-id').textContent    = `#${order.id}`;
     document.getElementById('modal-logistic').innerHTML      = logisticLabel;
     document.getElementById('modal-name').textContent        = name;
-    document.getElementById('modal-nickname').textContent    = meta.buyer_nickname || '—';
+    document.getElementById('modal-nickname').textContent    = ship.full_address || [ship.address_1, ship.city].filter(Boolean).join(', ') || '—';
     document.getElementById('modal-rut').textContent         = meta.rut || '—';
     document.getElementById('modal-phone').textContent       = ship.phone || '—';
     document.getElementById('modal-shipping-status').textContent = meta.shipping_status || '—';
@@ -1563,7 +1563,7 @@
             <p id="modal-name" class="font-semibold text-coffee-900 text-sm mt-0.5 break-words"></p>
           </div>
           <div class="bg-coffee-50 rounded-xl px-3 py-2.5">
-            <p class="text-xs text-coffee-400">Usuario MeLi</p>
+            <p class="text-xs text-coffee-400">Dirección</p>
             <p id="modal-nickname" class="font-semibold text-coffee-900 text-sm mt-0.5 break-words"></p>
           </div>
           <div class="bg-coffee-50 rounded-xl px-3 py-2.5">
