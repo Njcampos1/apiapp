@@ -858,11 +858,27 @@
       : '';
 
     // ── Botón de acción según plataforma y estado ─────────────────
-    let actionBtn;
+    // Siempre hay un botón "Ver detalle" disponible
+    const detailBtn = `<button
+           onclick="openMeliDetailModal('${order.source}', '${order.id}')"
+           class="flex-1 bg-coffee-100 hover:bg-coffee-200 active:scale-95 text-coffee-900 font-bold py-3.5 rounded-xl transition-all shadow-sm text-base flex items-center justify-center gap-2">
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+               d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+           </svg>
+           Ver detalle
+         </button>`;
+
+    let actionBtn = '';
+    let showBothButtons = false;
+
     if (isMeli && isMeliLocked) {
-      // MeLi ya despachado/entregado: botón gris deshabilitado
+      // MeLi ya despachado/entregado: solo botón deshabilitado + ver detalle
+      showBothButtons = true;
       actionBtn = `<button disabled
-           class="w-full bg-gray-100 text-gray-500 font-bold py-3.5 rounded-xl text-base flex items-center justify-center gap-2 cursor-not-allowed">
+           class="flex-1 bg-gray-100 text-gray-500 font-bold py-3.5 rounded-xl text-base flex items-center justify-center gap-2 cursor-not-allowed">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
@@ -870,10 +886,11 @@
            🚚 Ya despachado
          </button>`;
     } else if (isMeli && isCompleted) {
-      // MeLi completado pero no locked: botón de reimpresión
+      // MeLi completado: mostrar "Ver detalle" + "Re-descargar ZPL"
+      showBothButtons = true;
       actionBtn = `<button
            onclick="downloadSingleZpl('${order.source}', '${order.id}')"
-           class="w-full bg-blue-500 hover:bg-blue-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           class="flex-1 bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -881,7 +898,7 @@
            Re-descargar ZPL
          </button>`;
     } else if (isMeli) {
-      // MeLi pendiente: botón "Ver detalle" que abre el modal
+      // MeLi pendiente: solo "Ver detalle" con el botón principal
       actionBtn = `<button
            onclick="openMeliDetailModal('${order.source}', '${order.id}')"
            class="w-full bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-yellow-900 font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
@@ -894,11 +911,12 @@
            Ver detalle
          </button>`;
     } else if (isPreparing) {
-      // WooCommerce en preparing: botón de re-impresión
+      // WooCommerce en preparing: mostrar "Ver detalle" + "Re-imprimir hoja"
+      showBothButtons = true;
       actionBtn = `<button
            onclick="prepareOrder('${order.id}', '${order.source}')"
            data-id="${order.id}"
-           class="prepare-btn w-full bg-orange-500 hover:bg-orange-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           class="prepare-btn flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -906,11 +924,12 @@
            Re-imprimir hoja
          </button>`;
     } else {
-      // WooCommerce processing: comportamiento original
+      // WooCommerce processing: mostrar "Ver detalle" + "Preparar pedido"
+      showBothButtons = true;
       actionBtn = `<button
            onclick="prepareOrder('${order.id}', '${order.source}')"
            data-id="${order.id}"
-           class="prepare-btn w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           class="prepare-btn flex-1 bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -918,6 +937,11 @@
            Preparar pedido
          </button>`;
     }
+
+    // Combinar botones si es necesario
+    const buttonsHtml = showBothButtons
+      ? `<div class="flex gap-2">${detailBtn}${actionBtn}</div>`
+      : actionBtn;
 
     const stripColor = order.source === 'woocommerce'
       ? 'bg-purple-500'
@@ -982,7 +1006,7 @@
           <span class="font-bold text-coffee-900">${total}</span>
         </div>
         ${productsDropdown}
-        ${actionBtn}
+        ${buttonsHtml}
       </div>
     </div>`;
   }

@@ -36,6 +36,7 @@ CHOCOLATE_SKUS: frozenset[str] = frozenset({
 })
 
 _RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
+_SKU_JSON_PATH = Path(__file__).parent.parent / "data" / "skus.json"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -53,6 +54,13 @@ def _load_rm_comunas() -> frozenset[str]:
     return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
+def _load_sku_multipliers() -> dict[str, int]:
+    """Devuelve el diccionario de multiplicadores por SKU."""
+    with open(_SKU_JSON_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    return data
+
+
 def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
     """
     Determina el courier según la ciudad y el origen del pedido.
@@ -67,12 +75,24 @@ def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
         return "Rocket" if is_rm else "Mercado"
 
 
-def _qty_chocolate(order: NormalizedOrder) -> int:
-    return sum(item.quantity for item in order.items if item.sku in CHOCOLATE_SKUS)
+def _qty_chocolate(order: NormalizedOrder, sku_multipliers: dict[str, int]) -> int:
+    """Calcula la cantidad total de unidades de chocolate, usando multiplicadores por SKU."""
+    total = 0
+    for item in order.items:
+        if item.sku in CHOCOLATE_SKUS:
+            multiplier = sku_multipliers.get(item.sku, 1)
+            total += item.quantity * multiplier
+    return total
 
 
-def _qty_cafe(order: NormalizedOrder) -> int:
-    return sum(item.quantity for item in order.items if item.sku not in CHOCOLATE_SKUS)
+def _qty_cafe(order: NormalizedOrder, sku_multipliers: dict[str, int]) -> int:
+    """Calcula la cantidad total de unidades de café, usando multiplicadores por SKU."""
+    total = 0
+    for item in order.items:
+        if item.sku not in CHOCOLATE_SKUS:
+            multiplier = sku_multipliers.get(item.sku, 1)
+            total += item.quantity * multiplier
+    return total
 
 
 def _qty_by_name(order: NormalizedOrder, keyword: str) -> int:
@@ -91,6 +111,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     NOTA: Excluye pedidos Full (fulfillment) ya que no se preparan en bodega.
     """
     rm_comunas = _load_rm_comunas()
+    sku_multipliers = _load_sku_multipliers()
     rows = []
 
     for order in orders:
@@ -122,8 +143,8 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),
             "Cobertor":         _qty_by_name(order, "cobertor"),
             "Detergente":       _qty_by_name(order, "detergente"),
-            "Chocolate":        _qty_chocolate(order),
-            "Cafe":             _qty_cafe(order),
+            "Chocolate":        _qty_chocolate(order, sku_multipliers),
+            "Cafe":             _qty_cafe(order, sku_multipliers),
             "Etiqueta_Impresa": label_printed_at_str,
             "Completado":       completed_at_str,
         })
