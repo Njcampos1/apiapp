@@ -355,6 +355,29 @@ class MeliProvider(BaseOrderProvider):
             datetime.now(timezone.utc) - timedelta(days=30)
         ).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
 
+        async def _enrich_order(raw: dict) -> Optional[dict]:
+            """
+            Enriquece una orden con datos de /shipments/{id}.
+            Para pedidos Full, el billing_info suele estar bloqueado por PII.
+            """
+            order_id = raw.get("id")
+            shipping_id = (raw.get("shipping") or {}).get("id")
+
+            # Enriquecer con datos del shipment (incluye logistic_type)
+            if shipping_id:
+                try:
+                    shipment_data = await self._get(f"/shipments/{shipping_id}")
+                    raw["shipping"].update(shipment_data)
+                except RuntimeError as exc:
+                    logger.warning(
+                        "MeLi: no se pudo enriquecer /shipments/%s para pedido Full %s: %s",
+                        shipping_id,
+                        order_id,
+                        exc,
+                    )
+
+            return raw
+
         while True:
             try:
                 data = await self._get(
@@ -378,7 +401,7 @@ class MeliProvider(BaseOrderProvider):
             if results:
                 try:
                     enriched_orders = await asyncio.gather(
-                        *[self._enrich_order(raw) for raw in results],
+                        *[_enrich_order(raw) for raw in results],
                         return_exceptions=True
                     )
 
