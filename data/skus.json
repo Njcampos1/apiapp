@@ -1,58 +1,397 @@
 {
-  "100100": 10,
-  "100200": 10,
-  "100300": 10,
-  "100400": 10,
-  "100500": 10,
-  "100600": 10,
-  "100700": 10,
-  "100800": 10,
-  "100900": 10,
-  "101000": 10,
-  "101000-1": 10,
-  "101000-1-2": 10,
-  "101000-1-2-1": 10,
-  "100100-2": 10,
-  "100100-2-1": 10,
-
-  "104000": 30,
-  "104001": 50,
-  "104002": 80,
-  "104003": 100,
-  "104004": 120,
-  "104005": 130,
-  "104006": 140,
-  "104007": 160,
-  "104008": 200,
-
-  "100100-1": 80,
-  "100501": 80,
-  "100502": 80,
-  "100503": 80,
-  "100504": 80,
-  "100505": 80,
-  "100506": 80,
-  "100507": 80,
-  "100508": 80,
-  "100509": 80,
-  "101000-1-1": 80,
-  "101000-1-1-1": 80,
-  "101000-1-2-1-1": 80,
-
-  "101000-1-3": 40,
-  "101000-1-1-1-1": 40,
-
-  "104003-1": 100,
-  "10203333": 100,
-
-  "102000": 30,
-  "103000": 50,
-  "103001": 80,
-  "103002": 100,
-  "103003": 160,
-  "103004": 200,
-  "103005": 260,
-  "103001-1": 80,
-  "103001-2": 80,
-  "103001-2-1": 40
+  "catalogo": {
+    "packs_prearmados": [
+      {
+        "sku": "104000",
+        "nombre": "Mini Pack 30 Cápsulas Café",
+        "cantidad_total_capsulas": 30,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104001",
+        "nombre": "Pack 50 Cápsulas Café Real Coffee",
+        "cantidad_total_capsulas": 50,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104002",
+        "nombre": "Pack 80 Cápsulas Café Real Coffee",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104003",
+        "nombre": "Pack 100 Cápsulas Café Real Coffee",
+        "cantidad_total_capsulas": 100,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104004",
+        "nombre": "Pack 120 Cápsulas Café Real Coffee",
+        "cantidad_total_capsulas": 120,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100700", "sabor": "Torino", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2-1", "sabor": "Firenze", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104005",
+        "nombre": "Pack 130 Cápsulas Café + Chocolate Real Coffee",
+        "cantidad_total_capsulas": 130,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 },
+          { "sku_unitario": "101000-1", "sabor": "Dark Chocolate Caliente", "cajas_de_10": 1 },
+          { "sku_unitario": "101000-1-2", "sabor": "Sweet Chocolate Caliente", "cajas_de_10": 1 },
+          { "sku_unitario": "101000-1-2-1", "sabor": "Sweet Caramel", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104006",
+        "nombre": "Pack 140 Cápsulas Café + Chocolate Real Coffee",
+        "cantidad_total_capsulas": 140,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 },
+          { "sku_unitario": "101000-1-2", "sabor": "Sweet Chocolate Caliente", "cajas_de_10": 4 }
+        ]
+      },
+      {
+        "sku": "104007",
+        "nombre": "Large Pack 160 Cápsulas Café",
+        "cantidad_total_capsulas": 160,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 2 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 2 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 2 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 2 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100700", "sabor": "Torino", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2-1", "sabor": "Firenze", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "104008",
+        "nombre": "XL Pack 200 Cápsulas Café",
+        "cantidad_total_capsulas": 200,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 2 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 2 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 2 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 2 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 2 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 2 },
+          { "sku_unitario": "100700", "sabor": "Torino", "cajas_de_10": 2 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 2 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2-1", "sabor": "Firenze", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "100100-1",
+        "nombre": "Pack 80 Cápsulas Café Espresso Napoli, Fair trade Signature Blend",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100501",
+        "nombre": "Pack 80 Cápsulas Café Espresso Milano, World's Strongest Organic Coffee",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100502",
+        "nombre": "Pack 80 Cápsulas Café Espresso Verona, Strong Espresso",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100503",
+        "nombre": "Pack 80 Cápsulas Café Espresso Venezia, Fair Trade",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100504",
+        "nombre": "Pack 80 Cápsulas Café Espresso Roma, Extra Strong, Fair Trade Espresso",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100505",
+        "nombre": "Pack 80 Cápsulas Café Espresso Bologna, Orgánico y Fair trade",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100506",
+        "nombre": "Pack 80 Cápsulas Café Espresso Torino Descafeinado",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100700", "sabor": "Torino", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100507",
+        "nombre": "Pack 80 Cápsulas Café Lungo San Marino, Orgánico y Fair Trade",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100508",
+        "nombre": "Pack 80 Cápsulas Café Lungo Colombia, Origen Único",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "100509",
+        "nombre": "Pack 80 Cápsulas de Café Espresso Sumatra, Origen Único",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "101000-1-1",
+        "nombre": "Pack 80 Cápsulas Dark Chocolate Caliente",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000-1", "sabor": "Dark Chocolate", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "101000-1-1-1",
+        "nombre": "Pack 80 Cápsulas Sweet Chocolate Caliente",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000-1-2", "sabor": "Sweet Chocolate", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "101000-1-2-1-1",
+        "nombre": "Pack 80 Cápsulas Sweet Caramel",
+        "cantidad_total_capsulas": 80,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000-1-2-1", "sabor": "Sweet Caramel", "cajas_de_10": 8 }]
+      },
+      {
+        "sku": "101000-1-3",
+        "nombre": "Pack 40 Cápsulas Dark Chocolate Caliente",
+        "cantidad_total_capsulas": 40,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000-1", "sabor": "Dark Chocolate", "cajas_de_10": 4 }]
+      },
+      {
+        "sku": "101000-1-1-1-1",
+        "nombre": "Pack 40 Cápsulas Sweet Chocolate Caliente",
+        "cantidad_total_capsulas": 40,
+        "es_personalizable": false,
+        "contenido": [{ "sku_unitario": "101000-1-2", "sabor": "Sweet Chocolate", "cajas_de_10": 4 }]
+      },
+      {
+        "sku": "104003-1",
+        "nombre": "Black Friday Pack 100 Cápsulas Café",
+        "cantidad_total_capsulas": 100,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 }
+        ]
+      },
+      {
+        "sku": "10203333",
+        "nombre": "Strong Pack CYBER 100 Capsulas Real Coffee para Nespresso",
+        "cantidad_total_capsulas": 100,
+        "es_personalizable": false,
+        "contenido": [
+          { "sku_unitario": "100100", "sabor": "Napoli", "cajas_de_10": 1 },
+          { "sku_unitario": "100200", "sabor": "Milano", "cajas_de_10": 1 },
+          { "sku_unitario": "100400", "sabor": "Venezia", "cajas_de_10": 1 },
+          { "sku_unitario": "100300", "sabor": "Verona", "cajas_de_10": 1 },
+          { "sku_unitario": "100500", "sabor": "Roma", "cajas_de_10": 1 },
+          { "sku_unitario": "100600", "sabor": "Bologna", "cajas_de_10": 1 },
+          { "sku_unitario": "100800", "sabor": "San Marino", "cajas_de_10": 1 },
+          { "sku_unitario": "101000", "sabor": "Sumatra", "cajas_de_10": 1 },
+          { "sku_unitario": "100900", "sabor": "Colombia", "cajas_de_10": 1 },
+          { "sku_unitario": "100100-2", "sabor": "Arezzo", "cajas_de_10": 1 }
+        ]
+      }
+    ],
+    "mix_personalizables": [
+      {
+        "sku": "102000",
+        "nombre": "Mix 30 Cápsulas café",
+        "cantidad_total_capsulas": 30,
+        "cajas_a_elegir": 3,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103000",
+        "nombre": "Mix 50 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 50,
+        "cajas_a_elegir": 5,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103001",
+        "nombre": "Mix 80 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 80,
+        "cajas_a_elegir": 8,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103002",
+        "nombre": "Mix 100 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 100,
+        "cajas_a_elegir": 10,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103003",
+        "nombre": "Mix 160 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 160,
+        "cajas_a_elegir": 16,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103004",
+        "nombre": "Mix 200 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 200,
+        "cajas_a_elegir": 20,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103005",
+        "nombre": "Mix 260 Cápsulas Compatibles Café",
+        "cantidad_total_capsulas": 260,
+        "cajas_a_elegir": 26,
+        "es_personalizable": true,
+        "restricciones_sabores": "cafe",
+        "contenido": []
+      },
+      {
+        "sku": "103001-1",
+        "nombre": "Mix 80 Cápsulas Chocolate y Caramel",
+        "cantidad_total_capsulas": 80,
+        "cajas_a_elegir": 8,
+        "es_personalizable": true,
+        "restricciones_sabores": "dulces",
+        "contenido": []
+      },
+      {
+        "sku": "103001-2",
+        "nombre": "Mix 80 Cápsulas Chocolate Caliente",
+        "cantidad_total_capsulas": 80,
+        "cajas_a_elegir": 8,
+        "es_personalizable": true,
+        "restricciones_sabores": "solo_chocolate",
+        "contenido": []
+      },
+      {
+        "sku": "103001-2-1",
+        "nombre": "Mix 40 Cápsulas Chocolate Caliente",
+        "cantidad_total_capsulas": 40,
+        "cajas_a_elegir": 4,
+        "es_personalizable": true,
+        "restricciones_sabores": "solo_chocolate",
+        "contenido": []
+      }
+    ]
+  }
 }

@@ -54,11 +54,39 @@ def _load_rm_comunas() -> frozenset[str]:
     return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
-def _load_sku_multipliers() -> dict[str, int]:
-    """Devuelve el diccionario de multiplicadores por SKU."""
+def _load_sku_data() -> tuple[dict[str, int], set[str]]:
+    """
+    Devuelve:
+    - Diccionario de multiplicadores por SKU: {sku: cantidad_total_capsulas}
+    - Set de SKUs unitarios (sku_unitario) que son componentes de packs
+    """
     with open(_SKU_JSON_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    return data
+
+    catalogo = data.get("catalogo", {})
+    multipliers = {}
+    unit_skus = set()
+
+    # Procesar packs prearmados
+    for pack in catalogo.get("packs_prearmados", []):
+        sku = pack.get("sku")
+        cantidad = pack.get("cantidad_total_capsulas")
+        if sku and cantidad:
+            multipliers[sku] = cantidad
+        # Recolectar SKUs unitarios
+        for item in pack.get("contenido", []):
+            unit_sku = item.get("sku_unitario")
+            if unit_sku:
+                unit_skus.add(unit_sku)
+
+    # Procesar mix personalizables
+    for mix in catalogo.get("mix_personalizables", []):
+        sku = mix.get("sku")
+        cantidad = mix.get("cantidad_total_capsulas")
+        if sku and cantidad:
+            multipliers[sku] = cantidad
+
+    return multipliers, unit_skus
 
 
 def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
@@ -75,23 +103,63 @@ def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
         return "Rocket" if is_rm else "Mercado"
 
 
-def _qty_chocolate(order: NormalizedOrder, sku_multipliers: dict[str, int]) -> int:
-    """Calcula la cantidad total de unidades de chocolate, usando multiplicadores por SKU."""
-    total = 0
-    for item in order.items:
-        if item.sku in CHOCOLATE_SKUS:
-            multiplier = sku_multipliers.get(item.sku, 1)
-            total += item.quantity * multiplier
-    return total
+def _qty_chocolate(
+    order: NormalizedOrder,
+    sku_multipliers: dict[str, int],
+    unit_skus: set[str]
+) -> int:
+    """
+    Calcula la cantidad total de unidades de chocolate.
 
-
-def _qty_cafe(order: NormalizedOrder, sku_multipliers: dict[str, int]) -> int:
-    """Calcula la cantidad total de unidades de café, usando multiplicadores por SKU."""
+    Lógica anti-doble conteo:
+    - Si el item es un pack (SKU en multipliers), usa quantity * multiplicador
+    - Si el item es un SKU unitario (componente de pack), lo ignora
+    - Solo cuenta items que no sean componentes de packs
+    """
     total = 0
     for item in order.items:
         if item.sku not in CHOCOLATE_SKUS:
-            multiplier = sku_multipliers.get(item.sku, 1)
-            total += item.quantity * multiplier
+            continue
+
+        # Si es un pack, usar multiplicador
+        if item.sku in sku_multipliers:
+            total += item.quantity * sku_multipliers[item.sku]
+        # Si es un SKU unitario (parte de un pack), ignorarlo
+        elif item.sku in unit_skus:
+            continue
+        # Items adicionales que no son packs ni componentes
+        else:
+            total += item.quantity
+    return total
+
+
+def _qty_cafe(
+    order: NormalizedOrder,
+    sku_multipliers: dict[str, int],
+    unit_skus: set[str]
+) -> int:
+    """
+    Calcula la cantidad total de unidades de café.
+
+    Lógica anti-doble conteo:
+    - Si el item es un pack (SKU en multipliers), usa quantity * multiplicador
+    - Si el item es un SKU unitario (componente de pack), lo ignora
+    - Solo cuenta items que no sean componentes de packs
+    """
+    total = 0
+    for item in order.items:
+        if item.sku in CHOCOLATE_SKUS:
+            continue
+
+        # Si es un pack, usar multiplicador
+        if item.sku in sku_multipliers:
+            total += item.quantity * sku_multipliers[item.sku]
+        # Si es un SKU unitario (parte de un pack), ignorarlo
+        elif item.sku in unit_skus:
+            continue
+        # Items adicionales que no son packs ni componentes
+        else:
+            total += item.quantity
     return total
 
 
@@ -111,7 +179,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     NOTA: Excluye pedidos Full (fulfillment) ya que no se preparan en bodega.
     """
     rm_comunas = _load_rm_comunas()
-    sku_multipliers = _load_sku_multipliers()
+    sku_multipliers, unit_skus = _load_sku_data()
     rows = []
 
     for order in orders:
@@ -143,8 +211,8 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),
             "Cobertor":         _qty_by_name(order, "cobertor"),
             "Detergente":       _qty_by_name(order, "detergente"),
-            "Chocolate":        _qty_chocolate(order, sku_multipliers),
-            "Cafe":             _qty_cafe(order, sku_multipliers),
+            "Chocolate":        _qty_chocolate(order, sku_multipliers, unit_skus),
+            "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus),
             "Etiqueta_Impresa": label_printed_at_str,
             "Completado":       completed_at_str,
         })

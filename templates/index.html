@@ -858,8 +858,9 @@
       : '';
 
     // ── Botón de acción según plataforma y estado ─────────────────
-    // Siempre hay un botón "Ver detalle" disponible
-    const detailBtn = `<button
+    // Botón "Ver detalle" solo para MercadoLibre
+    const detailBtn = isMeli
+      ? `<button
            onclick="openMeliDetailModal('${order.source}', '${order.id}')"
            class="flex-1 bg-coffee-100 hover:bg-coffee-200 active:scale-95 text-coffee-900 font-bold py-3.5 rounded-xl transition-all shadow-sm text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -869,7 +870,8 @@
                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
            </svg>
            Ver detalle
-         </button>`;
+         </button>`
+      : '';
 
     let actionBtn = '';
     let showBothButtons = false;
@@ -911,12 +913,11 @@
            Ver detalle
          </button>`;
     } else if (isPreparing) {
-      // WooCommerce en preparing: mostrar "Ver detalle" + "Re-imprimir hoja"
-      showBothButtons = true;
+      // WooCommerce en preparing: solo "Re-imprimir hoja"
       actionBtn = `<button
            onclick="prepareOrder('${order.id}', '${order.source}')"
            data-id="${order.id}"
-           class="prepare-btn flex-1 bg-orange-500 hover:bg-orange-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           class="prepare-btn w-full bg-orange-500 hover:bg-orange-400 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -924,12 +925,11 @@
            Re-imprimir hoja
          </button>`;
     } else {
-      // WooCommerce processing: mostrar "Ver detalle" + "Preparar pedido"
-      showBothButtons = true;
+      // WooCommerce processing: solo "Preparar pedido"
       actionBtn = `<button
            onclick="prepareOrder('${order.id}', '${order.source}')"
            data-id="${order.id}"
-           class="prepare-btn flex-1 bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
+           class="prepare-btn w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-all shadow text-base flex items-center justify-center gap-2">
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
