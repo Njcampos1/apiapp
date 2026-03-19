@@ -47,7 +47,7 @@ from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl
-from services.pack_service import enrich_order_with_pack_info
+from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -339,6 +339,9 @@ async def export_all_orders():
             detail="No hay pedidos nuevos en estado 'processing' para exportar",
         )
 
+    # Enriquecer pedidos con información de Packs antes de generar PDF
+    pending = enrich_orders_with_pack_info(pending)
+
     try:
         pdf_bytes = generate_bulk_picking_pdf(pending)
     except Exception as exc:
@@ -571,6 +574,9 @@ async def bulk_meli_pdf(
             },
         )
 
+    # Enriquecer pedidos con información de Packs antes de generar PDF
+    orders = enrich_orders_with_pack_info(orders)
+
     # Generar PDF multipágina
     try:
         pdf_bytes = generate_bulk_picking_pdf(orders)
@@ -782,6 +788,9 @@ async def prepare_order(
 
     if not order:
         raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
+
+    # Enriquecer pedido con información de Packs antes de generar PDF
+    order = enrich_order_with_pack_info(order)
 
     # Generar PDF
     try:

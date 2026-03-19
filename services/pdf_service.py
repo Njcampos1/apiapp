@@ -174,17 +174,45 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
     table_header = ["#", "Producto", "Cant."]
     table_data = [table_header]
 
+    # Estilo para el desglose de packs (texto más pequeño e indentado)
+    style_pack_detail = ParagraphStyle(
+        "pack_detail",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=COLOR_GRAY,
+        leftIndent=20,
+    )
+
     for idx, item in enumerate(order.items, start=1):
+        # Fila principal del item
+        product_name = item.name
+
+        # Si es un Pack, agregar marcador visual ▣
+        if item.is_pack:
+            product_name = f"▣ {item.name}"
+
         table_data.append([
             str(idx),
-            item.name,
+            product_name,
             str(item.quantity),
         ])
+
+        # Si es un Pack y tiene desglose, agregar filas indentadas con el contenido
+        if item.is_pack and item.pack_breakdown:
+            for pack_item in item.pack_breakdown:
+                detail_text = f"  → {pack_item.cajas_de_10}x {pack_item.sabor}"
+                table_data.append([
+                    "",
+                    Paragraph(detail_text, style_pack_detail),
+                    "",
+                ])
 
     # El espacio del checkbox se suma a Producto (antes 13, ahora 14.5)
     col_widths = [1 * cm, 14.5 * cm, 1.5 * cm]
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
-    items_table.setStyle(TableStyle([
+
+    # Construir estilos dinámicamente para diferenciar filas de desglose
+    table_styles = [
         # Encabezado — negrita sin fondo
         ("TEXTCOLOR",    (0, 0), (-1, 0),  COLOR_DARK),
         ("FONTNAME",     (0, 0), (-1, 0),  "Helvetica-Bold"),
@@ -200,7 +228,9 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
         ("LEFTPADDING",  (0, 0), (-1, -1), 4),
         # Solo línea horizontal entre filas (sin grilla vertical ni caja exterior)
         ("LINEBELOW",    (0, 1), (-1, -1), 0.4, COLOR_GRAY),
-    ]))
+    ]
+
+    items_table.setStyle(TableStyle(table_styles))
     elements.append(items_table)
     elements.append(Spacer(1, 0.5 * cm))
 
