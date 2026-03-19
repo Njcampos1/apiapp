@@ -161,6 +161,7 @@ class WooCommerceProvider(BaseOrderProvider):
             postcode=ship.get("postcode", ""),
             country=ship.get("country", ""),
             phone=billing.get("phone", ship.get("phone", "")),
+            email=billing.get("email", ""),
         )
 
         items = [

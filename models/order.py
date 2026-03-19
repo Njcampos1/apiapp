@@ -52,6 +52,7 @@ class ShippingAddress(BaseModel):
     postcode:   str = ""
     country:    str = ""
     phone:      str = ""
+    email:      str = ""
 
     @property
     def full_name(self) -> str:

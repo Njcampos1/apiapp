@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS meli_tokens (
 );
 """
 
+CREATE_MANIFESTS_TABLE = """
+CREATE TABLE IF NOT EXISTS manifests (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    status     TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    closed_at  TEXT,
+    CHECK (status IN ('open', 'closed'))
+);
+"""
+
 
 async def init_db() -> None:
     """Crea las tablas si no existen y aplica migraciones pendientes."""
@@ -59,6 +69,7 @@ async def init_db() -> None:
         await db.execute(CREATE_ORDERS_TABLE)
         await db.execute(CREATE_EVENTS_TABLE)
         await db.execute(CREATE_MELI_TOKENS_TABLE)
+        await db.execute(CREATE_MANIFESTS_TABLE)
         await db.commit()
         # Migración: añadir completed_at si la columna aún no existe
         try:
@@ -85,6 +96,18 @@ async def init_db() -> None:
             logger.info("Columna seller_id añadida a meli_tokens")
         except aiosqlite.OperationalError:
             pass  # La columna ya existe
+
+        # Migración: añadir manifest_id a orders si la columna aún no existe
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN manifest_id INTEGER REFERENCES manifests(id)")
+            await db.commit()
+            logger.info("Columna manifest_id añadida a orders")
+        except aiosqlite.OperationalError:
+            pass  # La columna ya existe
+
+    # Migrar pedidos huérfanos a manifest retroactivo
+    await migrate_orphan_orders()
+
     logger.info("SQLite DB inicializada en %s", DB_PATH)
 
 
@@ -92,18 +115,32 @@ async def upsert_order(order: NormalizedOrder) -> None:
     """Guarda o actualiza un pedido normalizado."""
     now = datetime.utcnow().isoformat()
 
-    # Si se está marcando como completado, registrar el timestamp
+    # Si se está marcando como completado, registrar el timestamp Y asignar a manifest
+    manifest_id = None
     if order.status == OrderStatus.COMPLETED and order.completed_at is None:
         order.completed_at = datetime.utcnow()
+        # Auto-asignar al manifest abierto actual
+        manifest_id = await get_or_create_open_manifest()
 
     completed_at = order.completed_at.isoformat() if order.completed_at else None
     label_printed_at = order.label_printed_at.isoformat() if order.label_printed_at else None
 
     async with aiosqlite.connect(DB_PATH) as db:
+        # Primero verificar si el pedido ya existe y tiene manifest_id
+        async with db.execute(
+            "SELECT manifest_id FROM orders WHERE id = ? AND source = ?",
+            (order.id, order.source.value)
+        ) as cursor:
+            existing = await cursor.fetchone()
+
+        # Solo asignar manifest_id si el pedido es nuevo o no tiene uno asignado
+        if existing and existing[0] is not None:
+            manifest_id = None  # No sobrescribir manifest_id existente
+
         await db.execute(
             """
-            INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at, manifest_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id, source) DO UPDATE SET
                 status       = CASE
                                    WHEN orders.status IN ('preparing', 'labeled', 'completed')
@@ -130,7 +167,14 @@ async def upsert_order(order: NormalizedOrder) -> None:
                                        WHEN excluded.label_printed_at IS NOT NULL
                                        THEN excluded.label_printed_at
                                        ELSE orders.label_printed_at
-                                   END
+                                   END,
+                manifest_id = CASE
+                                  WHEN orders.manifest_id IS NOT NULL
+                                  THEN orders.manifest_id
+                                  WHEN excluded.manifest_id IS NOT NULL
+                                  THEN excluded.manifest_id
+                                  ELSE orders.manifest_id
+                              END
             """,
             (
                 order.id,
@@ -141,6 +185,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
                 now,
                 completed_at,
                 label_printed_at,
+                manifest_id,
             ),
         )
         await db.commit()
@@ -276,3 +321,144 @@ async def save_meli_token(
         )
         await db.commit()
     logger.debug("Tokens de MeLi guardados (expiran: %s)", expires_at.isoformat())
+
+
+# ── Manifiestos (Lotes de Despacho) ──────────────────────────────────────────
+
+
+async def get_or_create_open_manifest() -> int:
+    """
+    Devuelve el ID del manifest abierto actualmente.
+    Si no existe ninguno, crea uno nuevo.
+    """
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Intentar obtener manifest abierto
+        async with db.execute(
+            "SELECT id FROM manifests WHERE status = 'open' ORDER BY created_at DESC LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if row:
+            return row[0]
+
+        # No existe, crear uno nuevo
+        cursor = await db.execute(
+            "INSERT INTO manifests (status, created_at) VALUES ('open', ?)",
+            (now,)
+        )
+        await db.commit()
+        logger.info("Manifest #%d creado automáticamente", cursor.lastrowid)
+        return cursor.lastrowid
+
+
+async def close_manifest(manifest_id: int) -> bool:
+    """
+    Cierra un manifest específico.
+    Retorna True si se cerró exitosamente, False si no existe o ya estaba cerrado.
+    """
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            UPDATE manifests
+            SET status = 'closed', closed_at = ?
+            WHERE id = ? AND status = 'open'
+            """,
+            (now, manifest_id)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_manifest_orders(manifest_id: int) -> List[NormalizedOrder]:
+    """
+    Devuelve todos los pedidos asociados a un manifest específico.
+    """
+    results: List[NormalizedOrder] = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT payload_json FROM orders
+            WHERE manifest_id = ?
+            ORDER BY label_printed_at DESC, completed_at DESC
+            """,
+            (manifest_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    for row in rows:
+        try:
+            results.append(NormalizedOrder.model_validate_json(row[0]))
+        except Exception as exc:
+            logger.warning("No se pudo deserializar pedido de manifest %s: %s", manifest_id, exc)
+
+    return results
+
+
+async def get_open_manifest_info() -> Optional[dict]:
+    """
+    Devuelve información del manifest abierto actual o None si no existe.
+    Retorna: {"id": int, "created_at": str, "order_count": int}
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT m.id, m.created_at, COUNT(o.id) as order_count
+            FROM manifests m
+            LEFT JOIN orders o ON o.manifest_id = m.id
+            WHERE m.status = 'open'
+            GROUP BY m.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "created_at": row[1],
+        "order_count": row[2]
+    }
+
+
+async def migrate_orphan_orders() -> None:
+    """
+    Asigna un manifest retroactivo a pedidos completados que no tienen manifest_id.
+    Crea un manifest histórico cerrado para agruparlos.
+    """
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Verificar si hay pedidos huérfanos
+        async with db.execute(
+            "SELECT COUNT(*) FROM orders WHERE status = 'completed' AND manifest_id IS NULL"
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+
+        if count == 0:
+            return
+
+        # Crear manifest retroactivo cerrado
+        cursor = await db.execute(
+            "INSERT INTO manifests (status, created_at, closed_at) VALUES ('closed', ?, ?)",
+            (now, now)
+        )
+        retroactive_manifest_id = cursor.lastrowid
+
+        # Asignar todos los pedidos huérfanos a este manifest
+        await db.execute(
+            """
+            UPDATE orders
+            SET manifest_id = ?
+            WHERE status = 'completed' AND manifest_id IS NULL
+            """,
+            (retroactive_manifest_id,)
+        )
+        await db.commit()
+
+        logger.info("Migrados %d pedidos huérfanos al manifest retroactivo #%d",
+                    count, retroactive_manifest_id)
+

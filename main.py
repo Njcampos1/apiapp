@@ -27,7 +27,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from io import BytesIO
 from typing import Dict, List, Optional
+import zipfile
 
 import httpx
 import uvicorn
@@ -39,7 +41,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import init_db, upsert_order, log_event, get_local_status, get_completed_orders, get_preparing_orders, save_meli_token
+from database import (
+    init_db,
+    upsert_order,
+    log_event,
+    get_local_status,
+    get_completed_orders,
+    get_preparing_orders,
+    save_meli_token,
+    get_or_create_open_manifest,
+    close_manifest,
+    get_manifest_orders,
+    get_open_manifest_info,
+)
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
 from providers.woo_client import WooCommerceProvider
@@ -48,6 +62,7 @@ from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
+from services.chilexpress_service import generate_chilexpress_csv
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -399,6 +414,137 @@ async def export_excel():
             "X-Orders-Count": str(len(orders)),
         },
     )
+
+
+# ── Manifiestos (Lotes de Despacho) ──────────────────────────────
+@app.post("/api/manifests/close", tags=["manifests"])
+async def close_daily_manifest():
+    """
+    Cierra el manifest abierto actual y genera un ZIP con:
+    - Excel de todos los pedidos del manifest
+    - CSV de Chilexpress (solo pedidos regionales)
+
+    El ZIP se nombra: despachos_YYYYMMDD.zip
+
+    Retorna:
+        - 404 si no hay manifest abierto
+        - 422 si el manifest está vacío
+        - 200 con el archivo ZIP
+    """
+    # Obtener manifest abierto
+    manifest_info = await get_open_manifest_info()
+
+    if not manifest_info:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay manifest abierto para cerrar"
+        )
+
+    manifest_id = manifest_info["id"]
+    order_count = manifest_info["order_count"]
+
+    if order_count == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="El manifest está vacío. No se puede cerrar un manifest sin pedidos."
+        )
+
+    # Obtener pedidos del manifest
+    orders = await get_manifest_orders(manifest_id)
+
+    if not orders:
+        raise HTTPException(
+            status_code=422,
+            detail="No se pudieron recuperar los pedidos del manifest"
+        )
+
+    # Cerrar el manifest
+    closed = await close_manifest(manifest_id)
+
+    if not closed:
+        raise HTTPException(
+            status_code=409,
+            detail="El manifest ya estaba cerrado o no existe"
+        )
+
+    # Registrar evento
+    await log_event(
+        str(manifest_id),
+        "system",
+        "manifest_closed",
+        f"Manifest #{manifest_id} cerrado con {order_count} pedidos"
+    )
+
+    # Generar archivos
+    try:
+        excel_bytes = generate_excel(orders)
+    except Exception as exc:
+        logger.exception("Error generando Excel para manifest #%d", manifest_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando Excel: {exc}"
+        )
+
+    try:
+        chilexpress_bytes = generate_chilexpress_csv(orders)
+    except Exception as exc:
+        logger.exception("Error generando CSV Chilexpress para manifest #%d", manifest_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generando CSV Chilexpress: {exc}"
+        )
+
+    # Crear ZIP
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Agregar Excel
+        zip_file.writestr("planilla_despachos.xlsx", excel_bytes)
+        # Agregar CSV
+        zip_file.writestr("chilexpress_regional.csv", chilexpress_bytes)
+
+    zip_buffer.seek(0)
+    zip_bytes = zip_buffer.getvalue()
+
+    # Nombre del archivo con fecha del cierre
+    fecha = datetime.utcnow().strftime("%Y%m%d")
+    filename = f"despachos_{fecha}.zip"
+
+    logger.info(
+        "Manifest #%d cerrado exitosamente. ZIP generado: %s (%d pedidos)",
+        manifest_id, filename, order_count
+    )
+
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Manifest-Id": str(manifest_id),
+            "X-Orders-Count": str(order_count),
+        },
+    )
+
+
+@app.get("/api/manifests/current", tags=["manifests"])
+async def get_current_manifest():
+    """
+    Devuelve información del manifest abierto actual.
+    Útil para mostrar en el frontend cuántos pedidos lleva el día.
+    """
+    manifest_info = await get_open_manifest_info()
+
+    if not manifest_info:
+        return {
+            "exists": False,
+            "id": None,
+            "created_at": None,
+            "order_count": 0
+        }
+
+    return {
+        "exists": True,
+        **manifest_info
+    }
 
 
 # ── Mercado Libre — Descarga masiva ZPL nativo ───────────────────

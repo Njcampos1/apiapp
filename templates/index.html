@@ -134,13 +134,13 @@
         </svg>
         Descargar todos (PDF)
       </button>
-      <button onclick="exportExcel()" id="export-excel-btn"
+      <button onclick="closeManifestAndDownload()" id="close-manifest-btn"
         class="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-emerald-700 active:scale-95 transition-all shadow">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
-        Descargar Excel
+        Cerrar Día y Descargar Planillas
       </button>
       <button onclick="loadOrders()" id="refresh-btn"
         class="flex items-center gap-2 bg-coffee-900 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-coffee-800 active:scale-95 transition-all shadow">
@@ -150,6 +150,14 @@
         </svg>
         Actualizar
       </button>
+      <!-- Info del manifest actual -->
+      <div id="manifest-info" class="text-sm text-coffee-600 ml-2 flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <span id="manifest-count">Cargando...</span>
+      </div>
     </div>
   </div>
 
@@ -727,47 +735,94 @@
     }
   }
 
-  // ── Dashboard — descarga Excel ─────────────────────────────────
-  async function exportExcel() {
-    const btn = document.getElementById('export-excel-btn');
+  // ── Dashboard — cerrar manifest y descargar ZIP ────────────────
+  async function closeManifestAndDownload() {
+    const btn = document.getElementById('close-manifest-btn');
+    const originalHTML = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = `<svg class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
       <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-    </svg> Generando...`;
+    </svg> Cerrando día...`;
 
     try {
-      const r = await fetch('/api/orders/export-excel');
+      const r = await fetch('/api/manifests/close', {
+        method: 'POST'
+      });
 
       if (r.status === 404) {
-        toast('No hay pedidos completados para exportar', 'info');
+        toast('No hay manifest abierto para cerrar', 'info');
         return;
       }
+
+      if (r.status === 422) {
+        const err = await r.json().catch(() => ({}));
+        toast(err.detail || 'El manifest está vacío', 'warning');
+        return;
+      }
+
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
         toast(`Error: ${err.detail || r.statusText}`, 'error');
         return;
       }
 
+      // Descargar ZIP
       const blob = await r.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `reporte_pedidos.xlsx`;
+
+      // Obtener nombre del archivo desde headers
+      const contentDisposition = r.headers.get('Content-Disposition');
+      let filename = 'despachos.zip';
+      if (contentDisposition) {
+        const matches = /filename="(.+)"/.exec(contentDisposition);
+        if (matches) filename = matches[1];
+      }
+
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      const count = r.headers.get('X-Orders-Count') || '?';
-      toast(`Excel descargado (${count} pedidos completados)`, 'success');
+      const orderCount = r.headers.get('X-Orders-Count') || '0';
+      toast(`Día cerrado exitosamente. ${orderCount} pedidos procesados.`, 'success');
+
+      // Actualizar info del manifest
+      loadManifestInfo();
+
+      // Opcional: recargar pedidos para reflejar el nuevo manifest
+      setTimeout(() => loadOrders(), 1000);
 
     } catch (err) {
-      toast('Error de conexión', 'error');
+      console.error('Error al cerrar manifest:', err);
+      toast('Error de red al cerrar el día', 'error');
     } finally {
       btn.disabled = false;
-      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-          d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-      </svg> Descargar Excel`;
+      btn.innerHTML = originalHTML;
+    }
+  }
+
+  // ── Cargar info del manifest actual ─────────────────────────────
+  async function loadManifestInfo() {
+    try {
+      const r = await fetch('/api/manifests/current');
+      if (!r.ok) return;
+
+      const data = await r.json();
+      const countEl = document.getElementById('manifest-count');
+
+      if (countEl) {
+        if (data.exists) {
+          countEl.textContent = `Manifest actual: ${data.order_count} pedidos`;
+        } else {
+          countEl.textContent = 'Sin manifest abierto';
+        }
+      }
+    } catch (err) {
+      console.error('Error cargando info de manifest:', err);
     }
   }
 
@@ -1704,6 +1759,7 @@
   window.addEventListener('DOMContentLoaded', () => {
     setFilter('all'); // Aplica estilos de pills en el estado inicial
     loadOrders();
+    loadManifestInfo();
     pingPrinter();
     setInterval(pingPrinter, 30_000);
   });
