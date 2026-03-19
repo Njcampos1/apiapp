@@ -767,6 +767,8 @@ async def get_order(
         raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
 
     await upsert_order(order)
+    # Enriquecer con información de desglose de Packs
+    order = enrich_order_with_pack_info(order)
     return order.model_dump(mode="json")
 
 
