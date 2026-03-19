@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class OrderStatus(str, Enum):
@@ -40,6 +40,8 @@ class OrderItem(BaseModel):
     # Información de desglose para Packs
     is_pack: bool = False
     pack_breakdown: Optional[List[PackItem]] = None
+    # Alerta si el producto tiene "Pack" en el nombre pero no está en el catálogo
+    catalog_warning: bool = False
 
 
 class ShippingAddress(BaseModel):
@@ -76,8 +78,8 @@ class NormalizedOrder(BaseModel):
     items:            List[OrderItem]
     total:            float
     currency:         str = "CLP"
-    created_at:       datetime = Field(default_factory=datetime.utcnow)
-    updated_at:       datetime = Field(default_factory=datetime.utcnow)
+    created_at:       datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at:       datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at:     Optional[datetime] = None
     label_printed_at: Optional[datetime] = None  # Timestamp exacto de impresión de etiqueta
     # Metadatos opacos para round-trip a la plataforma original
