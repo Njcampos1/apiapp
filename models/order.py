@@ -25,11 +25,21 @@ class OrderSource(str, Enum):
     MANUAL       = "manual"
 
 
+class PackItem(BaseModel):
+    """Detalle de un componente dentro de un Pack"""
+    sku_unitario: str
+    sabor: str
+    cajas_de_10: int
+
+
 class OrderItem(BaseModel):
     sku:      str
     name:     str
     quantity: int
     price:    float
+    # Información de desglose para Packs
+    is_pack: bool = False
+    pack_breakdown: Optional[List[PackItem]] = None
 
 
 class ShippingAddress(BaseModel):

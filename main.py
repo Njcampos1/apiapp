@@ -47,6 +47,7 @@ from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl
+from services.pack_service import enrich_order_with_pack_info
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -276,6 +277,8 @@ async def list_orders():
                     o.status = local_status
 
                 await upsert_order(o)
+                # Enriquecer con información de desglose de Packs
+                o = enrich_order_with_pack_info(o)
                 all_orders.append(o.model_dump(mode="json"))
         except Exception as exc:
             logger.error("Error al obtener pedidos de %s: %s", source, exc)
@@ -288,6 +291,8 @@ async def list_orders():
         preparing = await get_preparing_orders()
         for o in preparing:
             if o.id not in existing_ids:
+                # Enriquecer con información de desglose de Packs
+                o = enrich_order_with_pack_info(o)
                 all_orders.append(o.model_dump(mode="json"))
     except Exception as exc:
         logger.error("Error al obtener pedidos PREPARING para recuperación: %s", exc)

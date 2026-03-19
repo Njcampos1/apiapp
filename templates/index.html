@@ -964,6 +964,7 @@
         : 'bg-gray-400';
 
     // Desplegable de productos (solo WooCommerce)
+    const hasPack = order.items && order.items.some(item => item.is_pack === true);
     const productsDropdown = (!isMeli && order.items && order.items.length > 0)
       ? `<details class="group mb-3">
            <summary class="cursor-pointer list-none flex items-center gap-1.5 text-coffee-500 hover:text-coffee-800 transition-colors select-none py-1">
@@ -972,12 +973,37 @@
              </svg>
              <span class="text-xs font-semibold">Ver productos (${order.items.length})</span>
            </summary>
-           <ul class="mt-1.5 space-y-0.5 border border-coffee-100 rounded-xl overflow-hidden">
-             ${(order.items || []).map((item, idx) => `
-               <li class="flex items-center gap-2.5 px-3 py-1.5 text-xs ${idx % 2 === 0 ? 'bg-coffee-50' : 'bg-white'}">
-                 <span class="bg-coffee-900 text-white font-black text-[10px] w-5 h-5 rounded-full inline-flex items-center justify-center flex-shrink-0">${item.quantity}</span>
-                 <span class="text-coffee-800 leading-snug">${item.name}</span>
-               </li>`).join('')}
+           <ul class="mt-1.5 space-y-0.5 border ${hasPack ? 'border-orange-300 bg-orange-50' : 'border-coffee-100'} rounded-xl overflow-hidden">
+             ${(order.items || []).map((item, idx) => {
+               const bgColor = hasPack
+                 ? (idx % 2 === 0 ? 'bg-orange-100' : 'bg-orange-50')
+                 : (idx % 2 === 0 ? 'bg-coffee-50' : 'bg-white');
+
+               let itemHtml = `
+                 <li class="px-3 py-1.5 text-xs ${bgColor}">
+                   <div class="flex items-center gap-2.5">
+                     <span class="bg-coffee-900 text-white font-black text-[10px] w-5 h-5 rounded-full inline-flex items-center justify-center flex-shrink-0">${item.quantity}</span>
+                     <span class="text-coffee-800 leading-snug flex-1">${item.name}</span>
+                     ${item.is_pack ? '<span class="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-bold">PACK</span>' : ''}
+                   </div>`;
+
+               // Si es un Pack y tiene desglose, mostrarlo
+               if (item.is_pack && item.pack_breakdown && item.pack_breakdown.length > 0) {
+                 itemHtml += `
+                   <div class="ml-8 mt-1.5 space-y-0.5 text-[11px] text-coffee-600 border-l-2 border-orange-400 pl-2">
+                     ${item.pack_breakdown.map(pack => `
+                       <div class="flex items-center gap-1.5">
+                         <span class="font-semibold text-orange-700">${pack.cajas_de_10}x</span>
+                         <span>${pack.sabor}</span>
+                         <span class="text-coffee-400 text-[10px]">(SKU: ${pack.sku_unitario})</span>
+                       </div>
+                     `).join('')}
+                   </div>`;
+               }
+
+               itemHtml += '</li>';
+               return itemHtml;
+             }).join('')}
            </ul>
          </details>`
       : '';

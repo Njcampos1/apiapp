@@ -224,10 +224,10 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
         "Fecha_Etiqueta",
     ])
 
-    # Ordenar por fecha de etiqueta (de más antiguo a más reciente)
+    # Ordenar por fecha de etiqueta (de más reciente a más antiguo)
     # Los pedidos sin fecha irán al final
     df["_sort_key"] = pd.to_datetime(df["Fecha_Etiqueta"], errors="coerce")
-    df = df.sort_values("_sort_key", na_position="last")
+    df = df.sort_values("_sort_key", ascending=False, na_position="last")
     df = df.drop(columns=["_sort_key"])
 
     buffer = BytesIO()
