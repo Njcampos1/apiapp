@@ -647,6 +647,9 @@
       allOrders = d.orders || [];
       renderOrders();
 
+      // Actualizar contador de manifiestos
+      loadManifestInfo();
+
     } catch (err) {
       loading.classList.add('hidden');
       icon.classList.remove('spinner');
