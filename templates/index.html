@@ -1508,18 +1508,37 @@
         <span class="text-xs font-bold">${src.label}</span>
       </div>`;
 
-    const itemsHtml = (order.items || []).map(item => `
+    const itemsHtml = (order.items || []).map(item => {
+      let html = `
       <div class="flex items-center justify-between py-1.5 px-3 bg-coffee-50 rounded-xl">
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-semibold text-coffee-900 truncate">${item.name}</p>
-          <p class="text-xs text-coffee-400 font-mono">${item.sku}</p>
-        </div>
+          <div class="flex items-center gap-2">
+            <p class="text-sm font-semibold text-coffee-900 truncate">${item.name}</p>
+            ${item.is_pack ? '<span class="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-bold">PACK</span>' : ''}
+          </div>
+          <p class="text-xs text-coffee-400 font-mono">${item.sku}</p>`;
+
+      // Si es un Pack y tiene desglose, mostrarlo
+      if (item.is_pack && item.pack_breakdown && item.pack_breakdown.length > 0) {
+        html += '<div class="mt-1 ml-3 text-xs text-coffee-600">';
+        item.pack_breakdown.forEach(pack => {
+          html += `<div class="flex items-center gap-1">
+                     <span class="text-coffee-400">→</span>
+                     <span>${pack.cajas_de_10}x ${pack.sabor}</span>
+                   </div>`;
+        });
+        html += '</div>';
+      }
+
+      html += `</div>
         <div class="ml-3 flex-shrink-0">
           <span class="bg-coffee-900 text-white text-sm font-black w-7 h-7 rounded-full flex items-center justify-center">
             ${item.quantity}
           </span>
         </div>
-      </div>`).join('');
+      </div>`;
+      return html;
+    }).join('');
     document.getElementById('result-items').innerHTML = itemsHtml || '<p class="text-coffee-400 text-sm">Sin ítemes</p>';
 
     const noteSection = document.getElementById('result-note-section');

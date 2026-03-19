@@ -122,9 +122,15 @@ async def upsert_order(order: NormalizedOrder) -> None:
                                    THEN excluded.completed_at
                                    ELSE orders.completed_at
                                END,
-                label_printed_at = CASE WHEN excluded.label_printed_at IS NOT NULL
-                                        THEN excluded.label_printed_at
-                                        ELSE orders.label_printed_at END
+                label_printed_at = CASE
+                                       -- Preservar el label_printed_at existente si ya hay uno en BD
+                                       WHEN orders.label_printed_at IS NOT NULL
+                                       THEN orders.label_printed_at
+                                       -- Solo actualizar si el nuevo valor no es NULL y no había uno previo
+                                       WHEN excluded.label_printed_at IS NOT NULL
+                                       THEN excluded.label_printed_at
+                                       ELSE orders.label_printed_at
+                                   END
             """,
             (
                 order.id,

@@ -459,7 +459,10 @@ async def bulk_meli_zpl(
             # (MeLi ya lo marcó como 'listo para despachar' en el momento de consultar el ZPL)
             order = await meli.get_order(order_id)
             if order:
-                order.label_printed_at = datetime.utcnow()
+                # Solo asignar label_printed_at si es la primera vez (no está en BD)
+                existing_status = await get_local_status(order_id, OrderSource.MERCADOLIBRE.value)
+                if not existing_status or existing_status != OrderStatus.COMPLETED:
+                    order.label_printed_at = datetime.utcnow()
                 order.status = OrderStatus.COMPLETED
                 await upsert_order(order)
 
@@ -866,7 +869,10 @@ async def print_label(
     await log_event(order_id, source, "label_printed", f"Zebra {settings.ZEBRA_IP}")
 
     # Registrar timestamp exacto de impresión y marcar como completado
-    order.label_printed_at = datetime.utcnow()
+    # Solo asignar label_printed_at si es la primera vez (no está en BD como completado)
+    existing_status = await get_local_status(order_id, source)
+    if not existing_status or existing_status != OrderStatus.COMPLETED:
+        order.label_printed_at = datetime.utcnow()
     order.status = OrderStatus.COMPLETED
     await upsert_order(order)
 
