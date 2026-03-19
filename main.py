@@ -589,6 +589,7 @@ async def bulk_meli_zpl(
 
     zpl_blocks: List[str] = []
     failed: List[dict] = []
+    already_processed: List[str] = []
 
     for order_id in order_ids:
         try:
@@ -620,20 +621,64 @@ async def bulk_meli_zpl(
             )
             logger.info("MeLi bulk-zpl: pedido %s procesado OK", order_id)
 
-        except Exception as exc:
+        except RuntimeError as exc:
+            error_msg = str(exc)
+            # Detectar si el pedido ya fue procesado/entregado (picked_up, shipped, delivered)
+            if "ya fue procesado" in error_msg.lower() or \
+               "picked_up" in error_msg.lower() or \
+               "shipped" in error_msg.lower() or \
+               "delivered" in error_msg.lower() or \
+               "dropped_off" in error_msg.lower():
+                logger.info(
+                    "MeLi bulk-zpl: pedido %s ya fue procesado/entregado externamente, "
+                    "marcando como COMPLETED sin agregar a planilla de despachos",
+                    order_id
+                )
+                already_processed.append(order_id)
+
+                # Marcar como COMPLETED en BD local para que no aparezca como pendiente,
+                # pero SIN establecer label_printed_at ni asignar a manifest (se procesó fuera)
+                try:
+                    order = await meli.get_order(order_id)
+                    if order:
+                        order.status = OrderStatus.COMPLETED
+                        order.completed_at = datetime.utcnow()
+                        # Guardar solo actualizando el estado, sin asignar a manifest
+                        await upsert_order(order)
+
+                        await log_event(
+                            order_id,
+                            OrderSource.MERCADOLIBRE.value,
+                            "already_delivered_externally",
+                            "Pedido ya procesado externamente - marcado COMPLETED sin planilla"
+                        )
+                except Exception as sub_exc:
+                    logger.warning(
+                        "No se pudo marcar pedido %s como completado externamente: %s",
+                        order_id, sub_exc
+                    )
+                continue
+
+            # Otros errores: registrar y continuar
             logger.error(
                 "MeLi bulk-zpl: error al procesar pedido %s — %s", order_id, exc
+            )
+            failed.append({"order_id": order_id, "error": error_msg})
+        except Exception as exc:
+            logger.error(
+                "MeLi bulk-zpl: error inesperado al procesar pedido %s — %s", order_id, exc
             )
             failed.append({"order_id": order_id, "error": str(exc)})
 
     if not zpl_blocks:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": "No se pudo obtener ZPL para ninguno de los pedidos indicados.",
-                "failed": failed,
-            },
-        )
+        detail_msg = {
+            "message": "No se pudo obtener ZPL para ninguno de los pedidos indicados.",
+            "failed": failed,
+        }
+        if already_processed:
+            detail_msg["already_processed"] = already_processed
+            detail_msg["message"] += " Algunos pedidos ya fueron procesados externamente."
+        raise HTTPException(status_code=502, detail=detail_msg)
 
     # Concatenación con doble salto de línea entre bloques ZPL.
     # Cada bloque es un documento completo ^XA ... ^XZ; el doble \n
@@ -644,14 +689,18 @@ async def bulk_meli_zpl(
         "Content-Disposition": 'attachment; filename="etiquetas_meli.txt"',
         "X-Labels-Count": str(len(zpl_blocks)),
         "X-Failed-Count": str(len(failed)),
+        "X-Already-Processed-Count": str(len(already_processed)),
     }
     if failed:
         response_headers["X-Failed-Ids"] = ",".join(f["order_id"] for f in failed)
+    if already_processed:
+        response_headers["X-Already-Processed-Ids"] = ",".join(already_processed)
 
     logger.info(
-        "MeLi bulk-zpl: %d etiquetas generadas, %d fallidos",
+        "MeLi bulk-zpl: %d etiquetas generadas, %d fallidos, %d ya procesados externamente",
         len(zpl_blocks),
         len(failed),
+        len(already_processed),
     )
     return Response(
         content=combined_zpl.encode("utf-8"),

@@ -804,16 +804,47 @@ class MeliProvider(BaseOrderProvider):
             )
         except httpx.HTTPStatusError as exc:
             meli_error = exc.response.text
+            status_code = exc.response.status_code
             logger.error(
                 "MeLi HTTP %s al obtener ZPL — pedido=%s, shipping_id=%s, respuesta=%s",
-                exc.response.status_code,
+                status_code,
                 order_id,
                 shipping_id,
                 meli_error,
             )
+
+            # Detección específica de errores de estado no imprimible (HTTP 400)
+            # MeLi devuelve error_code SHPLAB0200 cuando el paquete ya fue recolectado
+            if status_code == 400:
+                # Parsear el JSON de error si es posible
+                try:
+                    import json
+                    error_data = json.loads(meli_error)
+                    error_code = error_data.get("error_code", "")
+                    message = error_data.get("message", "")
+
+                    # Estados no imprimibles comunes:
+                    # - picked_up: Ya recolectado por el courier
+                    # - shipped: Ya despachado
+                    # - delivered: Ya entregado al comprador
+                    if "picked_up" in message.lower() or "SHPLAB0200" in error_code:
+                        raise RuntimeError(
+                            f"No se puede imprimir la etiqueta porque el envío ya fue procesado "
+                            f"(pedido {order_id}, estado: picked_up). "
+                            "Este pedido ya fue recolectado por el courier."
+                        )
+                    elif "shipped" in message.lower() or "delivered" in message.lower():
+                        raise RuntimeError(
+                            f"No se puede imprimir la etiqueta porque el envío ya fue procesado "
+                            f"(pedido {order_id}, estado: {message}). "
+                            "Este pedido ya fue despachado o entregado."
+                        )
+                except (json.JSONDecodeError, KeyError):
+                    pass  # Si no se puede parsear, usar el mensaje genérico abajo
+
             raise RuntimeError(
                 f"Mercado Libre rechazó la etiqueta ZPL para pedido {order_id} "
-                f"(HTTP {exc.response.status_code}): {meli_error}"
+                f"(HTTP {status_code}): {meli_error}"
             )
 
         if not zpl or not zpl.strip():

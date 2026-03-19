@@ -117,26 +117,27 @@ async def upsert_order(order: NormalizedOrder) -> None:
 
     # Si se está marcando como completado, registrar el timestamp Y asignar a manifest
     manifest_id = None
-    if order.status == OrderStatus.COMPLETED and order.completed_at is None:
-        order.completed_at = datetime.utcnow()
-        # Auto-asignar al manifest abierto actual
-        manifest_id = await get_or_create_open_manifest()
+    if order.status == OrderStatus.COMPLETED:
+        # Establecer completed_at si no existe
+        if order.completed_at is None:
+            order.completed_at = datetime.utcnow()
+
+        # Auto-asignar al manifest abierto actual si no tiene uno ya asignado
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT manifest_id FROM orders WHERE id = ? AND source = ?",
+                (order.id, order.source.value)
+            ) as cursor:
+                existing = await cursor.fetchone()
+
+        # Solo asignar nuevo manifest_id si el pedido no tiene uno asignado
+        if not existing or existing[0] is None:
+            manifest_id = await get_or_create_open_manifest()
 
     completed_at = order.completed_at.isoformat() if order.completed_at else None
     label_printed_at = order.label_printed_at.isoformat() if order.label_printed_at else None
 
     async with aiosqlite.connect(DB_PATH) as db:
-        # Primero verificar si el pedido ya existe y tiene manifest_id
-        async with db.execute(
-            "SELECT manifest_id FROM orders WHERE id = ? AND source = ?",
-            (order.id, order.source.value)
-        ) as cursor:
-            existing = await cursor.fetchone()
-
-        # Solo asignar manifest_id si el pedido es nuevo o no tiene uno asignado
-        if existing and existing[0] is not None:
-            manifest_id = None  # No sobrescribir manifest_id existente
-
         await db.execute(
             """
             INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at, manifest_id)
