@@ -1508,35 +1508,53 @@
         <span class="text-xs font-bold">${src.label}</span>
       </div>`;
 
-    const itemsHtml = (order.items || []).map(item => {
-      let html = `
-      <div class="flex items-center justify-between py-1.5 px-3 bg-coffee-50 rounded-xl">
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
-            <p class="text-sm font-semibold text-coffee-900 truncate">${item.name}</p>
-            ${item.is_pack ? '<span class="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-bold">PACK</span>' : ''}
-          </div>
-          <p class="text-xs text-coffee-400 font-mono">${item.sku}</p>`;
+    const itemsHtml = (order.items || []).map((item, idx) => {
+      const isPack = item.is_pack;
+      const hasBreakdown = isPack && item.pack_breakdown && item.pack_breakdown.length > 0;
 
-      // Si es un Pack y tiene desglose, mostrarlo
-      if (item.is_pack && item.pack_breakdown && item.pack_breakdown.length > 0) {
-        html += '<div class="mt-1 ml-3 text-xs text-coffee-600">';
+      // Color de fondo según si es pack o no
+      const bgColor = isPack ? 'bg-orange-50 border-2 border-orange-200' : 'bg-coffee-50 border border-coffee-100';
+
+      let html = `
+      <div class="mb-2 rounded-xl overflow-hidden ${bgColor}">
+        <div class="flex items-center justify-between py-2 px-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <p class="text-sm font-semibold text-coffee-900">${item.name}</p>
+              ${isPack ? '<span class="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-bold">PACK</span>' : ''}
+            </div>
+            <p class="text-xs text-coffee-400 font-mono">SKU: ${item.sku}</p>
+          </div>
+          <div class="ml-3 flex-shrink-0">
+            <span class="bg-coffee-900 text-white text-sm font-black w-7 h-7 rounded-full flex items-center justify-center">
+              ${item.quantity}
+            </span>
+          </div>
+        </div>`;
+
+      // Si es un Pack y tiene desglose, mostrarlo en un panel destacado
+      if (hasBreakdown) {
+        html += `
+        <div class="bg-orange-100 border-t-2 border-orange-300 px-3 py-2">
+          <p class="text-xs font-bold text-orange-800 mb-1.5 uppercase tracking-wide">📦 Contenido del pack:</p>
+          <div class="space-y-1">`;
+
         item.pack_breakdown.forEach(pack => {
-          html += `<div class="flex items-center gap-1">
-                     <span class="text-coffee-400">→</span>
-                     <span>${pack.cajas_de_10}x ${pack.sabor}</span>
-                   </div>`;
+          html += `
+            <div class="flex items-center gap-2 bg-white rounded-lg px-2.5 py-1.5">
+              <span class="bg-orange-500 text-white text-xs font-black px-2 py-0.5 rounded-full min-w-[2rem] text-center">
+                ${pack.cajas_de_10}x
+              </span>
+              <span class="text-sm font-semibold text-orange-900">${pack.sabor}</span>
+            </div>`;
         });
-        html += '</div>';
+
+        html += `
+          </div>
+        </div>`;
       }
 
-      html += `</div>
-        <div class="ml-3 flex-shrink-0">
-          <span class="bg-coffee-900 text-white text-sm font-black w-7 h-7 rounded-full flex items-center justify-center">
-            ${item.quantity}
-          </span>
-        </div>
-      </div>`;
+      html += `</div>`;
       return html;
     }).join('');
     document.getElementById('result-items').innerHTML = itemsHtml || '<p class="text-coffee-400 text-sm">Sin ítemes</p>';
