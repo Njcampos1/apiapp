@@ -69,10 +69,18 @@ def _load_sku_data() -> tuple[dict[str, int], set[str]]:
 
     # Procesar packs prearmados
     for pack in catalogo.get("packs_prearmados", []):
-        sku = pack.get("sku")
+        sku_principal = pack.get("sku_principal")
         cantidad = pack.get("cantidad_total_capsulas")
-        if sku and cantidad:
-            multipliers[sku] = cantidad
+
+        # Agregar sku_principal al diccionario
+        if sku_principal and cantidad:
+            multipliers[sku_principal] = cantidad
+
+        # Agregar también los skus_alias
+        for sku_alias in pack.get("skus_alias", []):
+            if sku_alias and cantidad:
+                multipliers[sku_alias] = cantidad
+
         # Recolectar SKUs unitarios
         for item in pack.get("contenido", []):
             unit_sku = item.get("sku_unitario")
@@ -81,10 +89,17 @@ def _load_sku_data() -> tuple[dict[str, int], set[str]]:
 
     # Procesar mix personalizables
     for mix in catalogo.get("mix_personalizables", []):
-        sku = mix.get("sku")
+        sku_principal = mix.get("sku_principal")
         cantidad = mix.get("cantidad_total_capsulas")
-        if sku and cantidad:
-            multipliers[sku] = cantidad
+
+        # Agregar sku_principal al diccionario
+        if sku_principal and cantidad:
+            multipliers[sku_principal] = cantidad
+
+        # Agregar también los skus_alias
+        for sku_alias in mix.get("skus_alias", []):
+            if sku_alias and cantidad:
+                multipliers[sku_alias] = cantidad
 
     return multipliers, unit_skus
 

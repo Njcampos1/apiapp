@@ -42,6 +42,8 @@ class OrderItem(BaseModel):
     pack_breakdown: Optional[List[PackItem]] = None
     # Alerta si el producto tiene "Pack" en el nombre pero no está en el catálogo
     catalog_warning: bool = False
+    # Meta_data crudo del line_item (para extraer selección de mixes)
+    raw_meta_data: Optional[List[Dict[str, Any]]] = None
 
 
 class ShippingAddress(BaseModel):

@@ -170,6 +170,7 @@ class WooCommerceProvider(BaseOrderProvider):
                 name=li.get("name", "Producto sin nombre"),
                 quantity=int(li.get("quantity", 1)),
                 price=float(li.get("price", 0)),
+                raw_meta_data=li.get("meta_data", []),
             )
             for li in raw.get("line_items", [])
         ]
