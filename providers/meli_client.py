@@ -580,6 +580,7 @@ class MeliProvider(BaseOrderProvider):
         # Estrategia de extracción:
         # - Priorizar billing_info de nivel raíz (endpoint /orders/{id}/billing_info)
         # - Fallback a buyer.billing_info (menos confiable, puede ser del titular de cuenta)
+        # - Fallback adicional: receiver_address puede tener doc_type/doc_number
         # - Manejar caso de billing_info como array (formato antiguo de MeLi)
         billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
         rut = (billing_info.get("doc_number") or "").strip()
@@ -589,6 +590,13 @@ class MeliProvider(BaseOrderProvider):
                 rut = (entry.get("doc_number") or "").strip()
                 if rut:
                     break
+        # Tercer fallback: intentar obtener de receiver_address
+        # (algunos vendedores pueden incluir doc_number en la dirección de envío)
+        if not rut:
+            receiver_doc_type = receiver.get("receiver_id_type", "")
+            receiver_doc_number = receiver.get("receiver_id_number", "")
+            if receiver_doc_type and receiver_doc_number:
+                rut = f"{receiver_doc_number}".strip()
 
         # ── Estado logístico real del envío en MeLi ─────────────────────────
         shipping_status = shipping_raw.get("status", "")
@@ -608,15 +616,50 @@ class MeliProvider(BaseOrderProvider):
         # ── Comentario / nota del cliente ───────────────────────────────────
         # MeLi no expone notas en la API estándar, pero algunos endpoints incluyen
         # 'notes' en el root o 'additional_info' en billing_info del buyer.
-        customer_note = (
-            (raw.get("notes") or "")
-            or (buyer.get("billing_info") or {}).get("additional_info", "")
-            or ""
-        ).strip()
+        # También podemos usar receiver_address.comment como fuente alternativa.
+        # Intentamos múltiples fuentes en orden de prioridad:
+        # 1. raw.notes (campo directo del pedido si existe)
+        # 2. billing_info.additional_info (información adicional en facturación)
+        # 3. receiver.comment (comentario en la dirección de envío)
+        customer_note_parts = []
+
+        # Fuente 1: raw.notes
+        if raw.get("notes"):
+            customer_note_parts.append(raw.get("notes").strip())
+
+        # Fuente 2: billing_info.additional_info
+        billing_additional = (buyer.get("billing_info") or {}).get("additional_info", "")
+        if billing_additional:
+            customer_note_parts.append(billing_additional.strip())
+
+        # Fuente 3: receiver.comment (si es sustancial y no solo una referencia de dirección)
+        receiver_comment = (receiver.get("comment") or "").strip()
+        if receiver_comment and len(receiver_comment) > 10:
+            # Solo incluir si parece ser una nota real (más de 10 caracteres)
+            customer_note_parts.append(receiver_comment)
+
+        # Combinar todas las fuentes únicas
+        customer_note = " | ".join(dict.fromkeys(customer_note_parts))  # Eliminar duplicados
+
+        # ── Logging de debug para diagnóstico de datos PII ─────────────────
+        # Solo loguear si alguno de los campos críticos está vacío (ayuda a debugging)
+        if not rut or not phone_str or not customer_note:
+            logger.debug(
+                "MeLi pedido %s - Datos PII incompletos: RUT=%s, Phone=%s, Note=%s, shipping_status=%s",
+                raw.get("id"),
+                "✓" if rut else "✗",
+                "✓" if phone_str else "✗",
+                "✓" if customer_note else "✗",
+                shipping_status,
+            )
 
         street   = receiver.get("street_name", "")
         number   = str(receiver.get("street_number", "") or "")
         address1 = f"{street} {number}".strip()
+
+        # ── Email del comprador ─────────────────────────────────────────────
+        # El email viene en buyer.email (datos del comprador)
+        email = (buyer.get("email") or "").strip()
 
         shipping_addr = ShippingAddress(
             first_name=first_name,
@@ -628,6 +671,7 @@ class MeliProvider(BaseOrderProvider):
             postcode=receiver.get("zip_code", "") or "",
             country=country_obj.get("id", "") if isinstance(country_obj, dict) else "",
             phone=phone_str,
+            email=email,
         )
 
         # ── Líneas de pedido ────────────────────────────────────────────────

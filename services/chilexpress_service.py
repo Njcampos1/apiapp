@@ -34,6 +34,20 @@ def _is_regional_order(order: NormalizedOrder) -> bool:
     return state_normalized not in RM_STATES
 
 
+def _is_woocommerce_regional(order: NormalizedOrder) -> bool:
+    """
+    Determina si un pedido debe incluirse en el CSV de Chilexpress.
+
+    Requisitos:
+    - Debe ser de WooCommerce (MercadoLibre NO va en esta planilla)
+    - Debe ser de región (NO RM)
+    """
+    return (
+        order.source.value == "woocommerce" and
+        _is_regional_order(order)
+    )
+
+
 def _parse_address(address: str) -> Tuple[str, str]:
     """
     Extrae calle y número de una dirección chilena.
@@ -68,7 +82,8 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
     """
     Genera un archivo CSV para carga masiva en Chilexpress.
 
-    Solo incluye pedidos donde shipping.state NO es RM/METROPOLITANA.
+    Solo incluye pedidos de WooCommerce donde shipping.state NO es RM/METROPOLITANA.
+    Los pedidos de MercadoLibre NO se incluyen en esta planilla.
 
     Args:
         orders: Lista de pedidos normalizados (usualmente de un manifest cerrado)
@@ -76,10 +91,10 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
     Returns:
         Bytes del archivo CSV codificado en UTF-8 con BOM (compatible Excel)
     """
-    # Filtrar solo pedidos regionales
-    regional_orders = [o for o in orders if _is_regional_order(o)]
+    # Filtrar solo pedidos de WooCommerce regionales
+    regional_orders = [o for o in orders if _is_woocommerce_regional(o)]
 
-    logger.info("Generando CSV Chilexpress: %d pedidos regionales de %d totales",
+    logger.info("Generando CSV Chilexpress: %d pedidos WooCommerce regionales de %d totales",
                 len(regional_orders), len(orders))
 
     # Definir columnas según especificación Chilexpress
