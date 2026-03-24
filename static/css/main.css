@@ -1,0 +1,25 @@
+/**
+ * main.css
+ * Estilos personalizados para UpperLogistics
+ * - Animaciones customizadas (pulse-ring, slide-in, spinner)
+ * - Estilos para el input de scanner
+ * - Estilos de scrollbar
+ */
+
+@keyframes pulse-ring { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.05);opacity:.9} }
+@keyframes slide-in   { from{transform:translateY(-12px);opacity:0} to{transform:translateY(0);opacity:1} }
+@keyframes spin-slow  { to{transform:rotate(360deg)} }
+.animate-pulse-ring { animation: pulse-ring 1.5s ease-in-out infinite; }
+.animate-slide-in   { animation: slide-in .25s ease-out; }
+.spinner { animation: spin-slow .8s linear infinite; }
+
+#scan-input {
+  caret-color: #c8a96e;
+  font-size: 1.5rem;
+  letter-spacing: .3em;
+}
+#scan-input:focus { outline: none; box-shadow: 0 0 0 4px rgba(200,169,110,.35); }
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:#f1f1f1; }
+::-webkit-scrollbar-thumb { background:#c8a96e; border-radius:3px; }
