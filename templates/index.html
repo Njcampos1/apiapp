@@ -75,6 +75,10 @@
         class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700">
         🔍 Verificar
       </button>
+      <button onclick="showView('tools')" id="tab-tools"
+        class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700">
+        🛠️ Herramientas
+      </button>
     </nav>
 
     <div class="flex items-center gap-2 text-xs text-coffee-200">
@@ -174,10 +178,6 @@
     <button onclick="setFilter('mercadolibre')" id="pill-mercadolibre"
       class="filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all">
       Mercado Libre
-    </button>
-    <button onclick="setFilter('meli-full')" id="pill-meli-full"
-      class="filter-pill px-3 py-1 rounded-full text-xs transition-all text-emerald-600 border border-emerald-200 hover:bg-emerald-50">
-      ⚡ Full (info)
     </button>
     <!-- Enlace discreto para recuperar hojas WooCommerce ya impresas -->
     <button onclick="setFilter('preparing')" id="pill-preparing"
@@ -395,6 +395,193 @@
   </div><!-- /flex-wrapper -->
 </section>
 
+<!-- ── Herramientas ──────────────────────────────────────────────── -->
+<section id="view-tools" class="hidden max-w-7xl mx-auto px-4 py-6">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold mb-1">Herramientas</h1>
+    <p class="text-sm text-coffee-600">Utilidades para operaciones de bodega</p>
+  </div>
+
+  <!-- Calculador DUN-14 -->
+  <div class="bg-white rounded-2xl shadow-lg p-6 border-2 border-coffee-200 mb-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-12 h-12 bg-coffee-100 rounded-full flex items-center justify-center">
+        <svg class="w-7 h-7 text-coffee-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+        </svg>
+      </div>
+      <div>
+        <h2 class="text-xl font-bold">Calculador DUN-14</h2>
+        <p class="text-sm text-coffee-600">Genera códigos DUN-14 (ITF-14) desde códigos EAN-13</p>
+      </div>
+    </div>
+
+    <!-- Tabs: Individual vs Por lotes -->
+    <div class="flex gap-2 mb-4 border-b border-coffee-200">
+      <button onclick="setDunTab('single')" id="dun-tab-single"
+        class="px-4 py-2 font-semibold text-sm transition-all border-b-2 border-coffee-400 text-coffee-900">
+        📦 Individual
+      </button>
+      <button onclick="setDunTab('batch')" id="dun-tab-batch"
+        class="px-4 py-2 font-semibold text-sm transition-all border-b-2 border-transparent text-coffee-400 hover:text-coffee-600">
+        📋 Por Lotes
+      </button>
+    </div>
+
+    <!-- Calculador Individual -->
+    <div id="dun-single-view">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-coffee-700 mb-2">
+            Código EAN-13 (13 dígitos)
+          </label>
+          <input
+            id="ean13-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="13"
+            placeholder="1234567890123"
+            class="w-full bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-lg text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400"
+            oninput="validateEan13(this)"
+          />
+          <p class="text-xs text-coffee-500 mt-1 ml-1">Ingresa 13 dígitos numéricos</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-coffee-700 mb-2">
+            Indicador de Empaque (1 dígito: 1-9)
+          </label>
+          <input
+            id="indicator-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="1"
+            placeholder="1"
+            value="1"
+            class="w-full bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-lg text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400"
+            oninput="validateIndicator(this)"
+          />
+          <p class="text-xs text-coffee-500 mt-1 ml-1">Número del 1 al 9 (0 reservado para casos especiales)</p>
+        </div>
+
+        <button onclick="calculateDun14Single()"
+          class="w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3 rounded-xl transition-all shadow-md">
+          Calcular DUN-14
+        </button>
+
+        <!-- Resultado Individual -->
+        <div id="dun14-result" class="hidden">
+          <div class="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+            <p class="text-xs font-bold text-green-700 uppercase tracking-wider mb-2">Resultado</p>
+            <div class="bg-white rounded-lg p-3 mb-3">
+              <p class="text-xs text-coffee-500 mb-1">DUN-14 Generado:</p>
+              <div class="flex items-center gap-2">
+                <p id="dun14-value" class="font-mono text-2xl font-bold text-coffee-900"></p>
+                <button onclick="copyDun14()"
+                  class="ml-auto px-3 py-1.5 bg-coffee-900 hover:bg-coffee-800 text-white text-xs font-semibold rounded-lg transition-all">
+                  Copiar
+                </button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="bg-white rounded-lg p-2">
+                <p class="text-coffee-500 mb-0.5">EAN-13 Original:</p>
+                <p class="font-mono font-bold text-coffee-900" id="result-ean13"></p>
+              </div>
+              <div class="bg-white rounded-lg p-2">
+                <p class="text-coffee-500 mb-0.5">Indicador:</p>
+                <p class="font-mono font-bold text-coffee-900" id="result-indicator"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calculador Por Lotes -->
+    <div id="dun-batch-view" class="hidden">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-coffee-700 mb-2">
+            Lista de códigos EAN-13
+          </label>
+          <textarea
+            id="ean13-batch-input"
+            rows="8"
+            placeholder="1234567890123&#10;9876543210987&#10;5555555555555&#10;..."
+            class="w-full bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400 resize-y"
+          ></textarea>
+          <p class="text-xs text-coffee-500 mt-1 ml-1">Un código EAN-13 por línea</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-coffee-700 mb-2">
+            Indicador de Empaque (1 dígito: 1-9)
+          </label>
+          <input
+            id="indicator-batch-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="1"
+            placeholder="1"
+            value="1"
+            class="w-full bg-coffee-50 border-2 border-coffee-200 rounded-xl px-4 py-3 font-mono text-lg text-coffee-900 placeholder-coffee-300 transition-all focus:border-coffee-400"
+            oninput="validateIndicator(this)"
+          />
+          <p class="text-xs text-coffee-500 mt-1 ml-1">Mismo indicador para todos los códigos</p>
+        </div>
+
+        <button onclick="calculateDun14Batch()"
+          class="w-full bg-coffee-900 hover:bg-coffee-800 active:scale-95 text-white font-bold py-3 rounded-xl transition-all shadow-md">
+          Calcular Todos
+        </button>
+
+        <!-- Resultados Por Lotes -->
+        <div id="dun14-batch-results" class="hidden">
+          <div class="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-bold text-green-700 uppercase tracking-wider">Resultados</p>
+              <button onclick="copyAllDun14()"
+                class="px-3 py-1.5 bg-coffee-900 hover:bg-coffee-800 text-white text-xs font-semibold rounded-lg transition-all">
+                Copiar Todos
+              </button>
+            </div>
+            <div class="bg-white rounded-lg p-3 max-h-96 overflow-y-auto">
+              <table class="w-full text-xs font-mono" id="dun14-batch-table">
+                <thead class="sticky top-0 bg-coffee-100">
+                  <tr class="text-left">
+                    <th class="py-2 px-2 font-bold text-coffee-700">EAN-13</th>
+                    <th class="py-2 px-2 font-bold text-coffee-700">Indicador</th>
+                    <th class="py-2 px-2 font-bold text-coffee-700">DUN-14</th>
+                  </tr>
+                </thead>
+                <tbody id="dun14-batch-tbody" class="divide-y divide-coffee-100">
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-3">
+              <button onclick="downloadDun14Csv()"
+                class="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold py-2.5 rounded-xl transition-all shadow flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Descargar CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Más herramientas se agregarán aquí en el futuro -->
+  <div class="bg-coffee-50 border-2 border-dashed border-coffee-200 rounded-2xl p-8 text-center">
+    <p class="text-coffee-400 font-medium">Más herramientas próximamente...</p>
+  </div>
+</section>
+
 <script>
   let currentOrder    = null;
   let activeView      = 'dashboard';
@@ -403,9 +590,8 @@
 
   // ── Estado del dashboard ──────────────────────────────────────
   let allOrders     = [];   // Todos los pedidos recibidos de la API
-  let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'meli-full' | 'preparing'
+  let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'preparing'
   let _orderCache   = {};   // Cache de objetos de pedido para el modal MeLi: "source:id" → order
-  let fullOrders    = [];   // Cache de pedidos Full de MeLi (solo informativo)
 
   const SOURCE_ICONS = {
     woocommerce: {
@@ -451,6 +637,7 @@
     activeView = view;
     document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
     document.getElementById('view-scanner').classList.toggle('hidden', view !== 'scanner');
+    document.getElementById('view-tools').classList.toggle('hidden', view !== 'tools');
 
     document.getElementById('tab-dashboard').className =
       view === 'dashboard'
@@ -459,6 +646,11 @@
 
     document.getElementById('tab-scanner').className =
       view === 'scanner'
+        ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
+        : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
+
+    document.getElementById('tab-tools').className =
+      view === 'tools'
         ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
         : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
 
@@ -494,18 +686,11 @@
   function setFilter(filter) {
     currentFilter = filter;
 
-    // Cargar pedidos Full si se selecciona ese filtro y aún no están en cache
-    if (filter === 'meli-full' && fullOrders.length === 0) {
-      loadFullOrders();
-      return; // loadFullOrders llamará a renderOrders cuando termine
-    }
-
     // Estilos de pills: activo vs inactivo
     const pills = {
       all:           document.getElementById('pill-all'),
       woocommerce:   document.getElementById('pill-woocommerce'),
       mercadolibre:  document.getElementById('pill-mercadolibre'),
-      'meli-full':   document.getElementById('pill-meli-full'),
       preparing:     document.getElementById('pill-preparing'),
     };
     const activeClass   = 'bg-coffee-900 text-white shadow-md';
@@ -513,16 +698,11 @@
     // Estilo especial para el pill de recuperación
     const preparingActive   = 'bg-orange-500 text-white shadow-md';
     const preparingInactive = 'ml-auto px-3 py-1 rounded-full text-xs transition-all text-coffee-500 border border-coffee-200 hover:bg-coffee-100';
-    // Estilo especial para el pill de Full
-    const fullActive   = 'bg-emerald-500 text-white shadow-md px-3 py-1 rounded-full text-xs transition-all';
-    const fullInactive = 'px-3 py-1 rounded-full text-xs transition-all text-emerald-600 border border-emerald-200 hover:bg-emerald-50';
 
     Object.entries(pills).forEach(([key, el]) => {
       if (!el) return;
       if (key === 'preparing') {
         el.className = `filter-pill ${filter === 'preparing' ? preparingActive + ' ml-auto px-3 py-1 rounded-full text-xs transition-all' : preparingInactive}`;
-      } else if (key === 'meli-full') {
-        el.className = `filter-pill ${filter === 'meli-full' ? fullActive : fullInactive}`;
       } else {
         el.className = `filter-pill px-4 py-1.5 rounded-full font-semibold text-sm transition-all ${
           key === filter ? activeClass : inactiveClass
@@ -559,9 +739,6 @@
         const bDone = b.status === 'completed' ? 1 : 0;
         return aDone - bDone;
       });
-    } else if (currentFilter === 'meli-full') {
-      // Pestaña de pedidos Full: solo informativo, sin acciones
-      filtered = fullOrders;
     } else if (currentFilter === 'woocommerce') {
       filtered = allOrders.filter(o => o.source === 'woocommerce' && o.status !== 'preparing' && o.status !== 'labeled');
     } else if (currentFilter === 'preparing') {
@@ -573,7 +750,6 @@
     }
 
     const inMeliFilter     = currentFilter === 'mercadolibre';
-    const inFullFilter     = currentFilter === 'meli-full';
     const inPreparingFilter = currentFilter === 'preparing';
 
     // Mostrar/ocultar barra de selección MeLi
@@ -590,8 +766,6 @@
     const pendingCount = filtered.filter(o => o.status !== 'completed').length;
     if (inMeliFilter) {
       count.textContent = `${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''} · ${filtered.length - pendingCount} ya generado${filtered.length - pendingCount !== 1 ? 's' : ''}`;
-    } else if (inFullFilter) {
-      count.textContent = `${filtered.length} pedido${filtered.length !== 1 ? 's' : ''} Full (solo info)`;
     } else if (inPreparingFilter) {
       count.textContent = `${filtered.length} hoja${filtered.length !== 1 ? 's' : ''} impresa${filtered.length !== 1 ? 's' : ''} (recuperables)`;
     } else {
@@ -655,41 +829,6 @@
       icon.classList.remove('spinner');
       document.getElementById('order-count').textContent = '—';
       toast('Error de conexión al servidor', 'error');
-    }
-  }
-
-  // ── Dashboard — carga de pedidos Full (solo informativo) ──────────
-  async function loadFullOrders() {
-    const grid    = document.getElementById('orders-grid');
-    const loading = document.getElementById('orders-loading');
-    const empty   = document.getElementById('empty-state');
-    const icon    = document.getElementById('refresh-icon');
-    const errBox  = document.getElementById('api-errors');
-
-    grid.classList.add('hidden');
-    empty.classList.add('hidden');
-    errBox.classList.add('hidden');
-    loading.classList.remove('hidden');
-    icon.classList.add('spinner');
-
-    try {
-      const r = await fetch('/api/orders/meli/full');
-      const d = await r.json();
-
-      loading.classList.add('hidden');
-      icon.classList.remove('spinner');
-
-      // Guardar pedidos Full en el cache global
-      fullOrders = d.orders || [];
-      renderOrders();
-
-    } catch (err) {
-      loading.classList.add('hidden');
-      icon.classList.remove('spinner');
-      document.getElementById('order-count').textContent = '—';
-      toast('Error al cargar pedidos Full de MeLi', 'error');
-      // Volver al filtro "all" si falla la carga
-      setFilter('all');
     }
   }
 
@@ -1757,6 +1896,222 @@
       document.getElementById('scan-input').focus();
     }
   });
+
+  // ── Herramientas — Calculador DUN-14 ──────────────────────────
+  let activeDunTab = 'single'; // 'single' | 'batch'
+  let batchResults = []; // Resultados del cálculo por lotes
+
+  function setDunTab(tab) {
+    activeDunTab = tab;
+
+    // Actualizar estilos de tabs
+    const singleTab = document.getElementById('dun-tab-single');
+    const batchTab = document.getElementById('dun-tab-batch');
+
+    const activeClass = 'px-4 py-2 font-semibold text-sm transition-all border-b-2 border-coffee-400 text-coffee-900';
+    const inactiveClass = 'px-4 py-2 font-semibold text-sm transition-all border-b-2 border-transparent text-coffee-400 hover:text-coffee-600';
+
+    singleTab.className = tab === 'single' ? activeClass : inactiveClass;
+    batchTab.className = tab === 'batch' ? activeClass : inactiveClass;
+
+    // Mostrar/ocultar vistas
+    document.getElementById('dun-single-view').classList.toggle('hidden', tab !== 'single');
+    document.getElementById('dun-batch-view').classList.toggle('hidden', tab !== 'batch');
+  }
+
+  function validateEan13(input) {
+    // Permitir solo números
+    input.value = input.value.replace(/\D/g, '');
+  }
+
+  function validateIndicator(input) {
+    // Permitir solo números del 1-9
+    input.value = input.value.replace(/[^1-9]/g, '');
+  }
+
+  function calcularDigitoControl(cadena13Digitos) {
+    /**
+     * Calcula el dígito de control para un código de 14 dígitos.
+     * Recibe la base de 13 dígitos (indicador + primeros 12 del EAN-13).
+     */
+    let suma = 0;
+    const reversed = cadena13Digitos.split('').reverse();
+
+    for (let i = 0; i < reversed.length; i++) {
+      const n = parseInt(reversed[i]);
+      if (i % 2 === 0) {
+        suma += n * 3;
+      } else {
+        suma += n;
+      }
+    }
+
+    const modulo = suma % 10;
+    const digitoControl = modulo === 0 ? 0 : 10 - modulo;
+    return digitoControl.toString();
+  }
+
+  function generarDun14(ean13, indicador) {
+    // Validaciones
+    if (ean13.length !== 13 || !/^\d+$/.test(ean13)) {
+      return { error: 'El EAN-13 debe tener exactamente 13 dígitos numéricos.' };
+    }
+    if (indicador.length !== 1 || !/^[1-9]$/.test(indicador)) {
+      return { error: 'El indicador debe ser un solo dígito del 1 al 9.' };
+    }
+
+    // Extraer los primeros 12 dígitos del EAN-13 (sin el dígito de control)
+    const cuerpoEan = ean13.substring(0, 12);
+    const codigoBase = indicador + cuerpoEan;
+
+    // Calcular el nuevo dígito verificador
+    const digitoVerificador = calcularDigitoControl(codigoBase);
+
+    const dun14 = codigoBase + digitoVerificador;
+
+    return { dun14, ean13, indicador };
+  }
+
+  function calculateDun14Single() {
+    const ean13Input = document.getElementById('ean13-input');
+    const indicatorInput = document.getElementById('indicator-input');
+    const resultDiv = document.getElementById('dun14-result');
+
+    const ean13 = ean13Input.value.trim();
+    const indicator = indicatorInput.value.trim();
+
+    if (!ean13 || !indicator) {
+      toast('Por favor completa todos los campos', 'warn');
+      return;
+    }
+
+    const result = generarDun14(ean13, indicator);
+
+    if (result.error) {
+      toast(result.error, 'error');
+      return;
+    }
+
+    // Mostrar resultado
+    document.getElementById('dun14-value').textContent = result.dun14;
+    document.getElementById('result-ean13').textContent = result.ean13;
+    document.getElementById('result-indicator').textContent = result.indicador;
+    resultDiv.classList.remove('hidden');
+
+    toast('DUN-14 calculado correctamente', 'success');
+  }
+
+  function copyDun14() {
+    const dun14 = document.getElementById('dun14-value').textContent;
+    navigator.clipboard.writeText(dun14).then(() => {
+      toast('DUN-14 copiado al portapapeles', 'success');
+    }).catch(() => {
+      toast('Error al copiar', 'error');
+    });
+  }
+
+  function calculateDun14Batch() {
+    const batchInput = document.getElementById('ean13-batch-input');
+    const indicatorInput = document.getElementById('indicator-batch-input');
+    const resultsDiv = document.getElementById('dun14-batch-results');
+    const tbody = document.getElementById('dun14-batch-tbody');
+
+    const ean13List = batchInput.value.trim().split('\n').filter(line => line.trim());
+    const indicator = indicatorInput.value.trim();
+
+    if (ean13List.length === 0) {
+      toast('Por favor ingresa al menos un código EAN-13', 'warn');
+      return;
+    }
+
+    if (!indicator) {
+      toast('Por favor ingresa el indicador', 'warn');
+      return;
+    }
+
+    // Limpiar resultados previos
+    batchResults = [];
+    tbody.innerHTML = '';
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    ean13List.forEach((ean13, index) => {
+      const cleanEan = ean13.trim();
+      if (!cleanEan) return;
+
+      const result = generarDun14(cleanEan, indicator);
+
+      if (result.error) {
+        errorCount++;
+        const row = `
+          <tr class="bg-red-50">
+            <td class="py-2 px-2 text-red-700">${cleanEan}</td>
+            <td class="py-2 px-2 text-red-700">-</td>
+            <td class="py-2 px-2 text-red-700 text-xs">Error: ${result.error}</td>
+          </tr>
+        `;
+        tbody.insertAdjacentHTML('beforeend', row);
+      } else {
+        successCount++;
+        batchResults.push(result);
+        const row = `
+          <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-coffee-50'}">
+            <td class="py-2 px-2">${result.ean13}</td>
+            <td class="py-2 px-2">${result.indicador}</td>
+            <td class="py-2 px-2 font-bold text-coffee-900">${result.dun14}</td>
+          </tr>
+        `;
+        tbody.insertAdjacentHTML('beforeend', row);
+      }
+    });
+
+    resultsDiv.classList.remove('hidden');
+
+    if (errorCount > 0) {
+      toast(`${successCount} códigos calculados, ${errorCount} con errores`, 'warn');
+    } else {
+      toast(`${successCount} códigos DUN-14 calculados correctamente`, 'success');
+    }
+  }
+
+  function copyAllDun14() {
+    if (batchResults.length === 0) {
+      toast('No hay resultados para copiar', 'warn');
+      return;
+    }
+
+    const text = batchResults.map(r => r.dun14).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      toast(`${batchResults.length} códigos DUN-14 copiados al portapapeles`, 'success');
+    }).catch(() => {
+      toast('Error al copiar', 'error');
+    });
+  }
+
+  function downloadDun14Csv() {
+    if (batchResults.length === 0) {
+      toast('No hay resultados para descargar', 'warn');
+      return;
+    }
+
+    // Crear CSV
+    let csv = 'EAN-13,Indicador,DUN-14\n';
+    batchResults.forEach(r => {
+      csv += `${r.ean13},${r.indicador},${r.dun14}\n`;
+    });
+
+    // Descargar
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dun14_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast('CSV descargado correctamente', 'success');
+  }
 
   // ── Inicialización ────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {

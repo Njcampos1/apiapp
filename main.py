@@ -807,42 +807,43 @@ async def bulk_meli_pdf(
 
 
 # ── Mercado Libre — Pedidos Full (informativos) ──────────────────
-@app.get("/api/orders/meli/full", tags=["meli"])
-async def list_full_orders():
-    """
-    Lista pedidos Full (fulfillment) de Mercado Libre de los últimos 30 días.
-
-    Estos pedidos NO se preparan en bodega ya que MeLi los gestiona
-    directamente desde sus centros de distribución. Este endpoint es
-    solo informativo para control y seguimiento.
-
-    Los datos de RUT/teléfono pueden estar bloqueados por PII si el
-    pedido ya fue despachado.
-    """
-    provider = _providers.get(OrderSource.MERCADOLIBRE.value)
-    if provider is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "El proveedor MercadoLibre no está activo. "
-                "Verifica que MELI_APP_ID y MELI_CLIENT_SECRET estén configurados."
-            ),
-        )
-
-    meli: MeliProvider = provider  # type: ignore[assignment]
-
-    try:
-        orders = await meli.get_full_orders()
-        return {
-            "orders": [o.model_dump(mode="json") for o in orders],
-            "total": len(orders),
-        }
-    except Exception as exc:
-        logger.error("Error al obtener pedidos Full de MeLi: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Error al obtener pedidos Full: {str(exc)}"
-        )
+# NOTA: Endpoint deshabilitado - funcionalidad removida del frontend
+# @app.get("/api/orders/meli/full", tags=["meli"])
+# async def list_full_orders():
+#     """
+#     Lista pedidos Full (fulfillment) de Mercado Libre de los últimos 30 días.
+#
+#     Estos pedidos NO se preparan en bodega ya que MeLi los gestiona
+#     directamente desde sus centros de distribución. Este endpoint es
+#     solo informativo para control y seguimiento.
+#
+#     Los datos de RUT/teléfono pueden estar bloqueados por PII si el
+#     pedido ya fue despachado.
+#     """
+#     provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+#     if provider is None:
+#         raise HTTPException(
+#             status_code=503,
+#             detail=(
+#                 "El proveedor MercadoLibre no está activo. "
+#                 "Verifica que MELI_APP_ID y MELI_CLIENT_SECRET estén configurados."
+#             ),
+#         )
+#
+#     meli: MeliProvider = provider  # type: ignore[assignment]
+#
+#     try:
+#         orders = await meli.get_full_orders()
+#         return {
+#             "orders": [o.model_dump(mode="json") for o in orders],
+#             "total": len(orders),
+#         }
+#     except Exception as exc:
+#         logger.error("Error al obtener pedidos Full de MeLi: %s", exc)
+#         raise HTTPException(
+#             status_code=502,
+#             detail=f"Error al obtener pedidos Full: {str(exc)}"
+#         )
 
 
 @app.get("/api/orders/{order_id}/zpl", tags=["orders"])
