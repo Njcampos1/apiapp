@@ -423,6 +423,17 @@ class MeliProvider(BaseOrderProvider):
                             )
                             continue
 
+                        # FILTRO: Excluir pedidos ya entregados
+                        # La pestaña Full es solo informativa para pedidos en proceso
+                        shipping_status = (enriched.get("shipping") or {}).get("status", "").lower()
+                        if shipping_status in ("delivered", "not_delivered"):
+                            logger.debug(
+                                "MeLi: pedido Full %s omitido (estado: %s - ya entregado)",
+                                enriched.get("id"),
+                                shipping_status,
+                            )
+                            continue
+
                         try:
                             order = self.normalize(enriched)
                             normalized.append(order)

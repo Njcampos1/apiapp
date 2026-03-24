@@ -91,8 +91,22 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
     Returns:
         Bytes del archivo CSV codificado en UTF-8 con BOM (compatible Excel)
     """
+    # Log de resumen de pedidos recibidos por fuente para debugging
+    from collections import Counter
+    sources_count = Counter(o.source.value for o in orders)
+    logger.info("Pedidos recibidos para Chilexpress CSV: %s", dict(sources_count))
+
     # Filtrar solo pedidos de WooCommerce regionales
     regional_orders = [o for o in orders if _is_woocommerce_regional(o)]
+
+    # Log de pedidos excluidos de MercadoLibre para verificación
+    meli_orders = [o for o in orders if o.source.value == "mercadolibre"]
+    if meli_orders:
+        logger.warning(
+            "ATENCIÓN: %d pedidos de MercadoLibre fueron EXCLUIDOS del CSV Chilexpress (IDs: %s)",
+            len(meli_orders),
+            [o.id for o in meli_orders]
+        )
 
     logger.info("Generando CSV Chilexpress: %d pedidos WooCommerce regionales de %d totales",
                 len(regional_orders), len(orders))
