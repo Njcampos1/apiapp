@@ -157,6 +157,9 @@ app.add_middleware(
 
 templates = Jinja2Templates(directory="templates")
 
+# ── Archivos estáticos ───────────────────────────────────────────
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 # ── Manejo global de errores ─────────────────────────────────────
 @app.exception_handler(Exception)
