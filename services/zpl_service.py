@@ -21,28 +21,44 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Tuple
+from typing import Tuple, List
 
 from models.order import NormalizedOrder
 
 logger = logging.getLogger(__name__)
 
 # Anchos máximos de texto por campo (en caracteres ZPL ~^FD)
-_MAX_NAME    = 25  # Reducido para evitar desbordamiento
+_MAX_NAME_LINE = 30  # Caracteres por línea para nombre/apellido (sin truncar)
 _MAX_ADDR    = 35
 _MAX_CITY    = 25
 _MAX_PHONE   = 20
 _MAX_ID      = 20
-_MAX_EMAIL   = 30
+_MAX_EMAIL   = 35
 _MAX_NOTE_LINE = 45  # Para customer_note
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _safe(text: str, max_len: int) -> str:
-    """Trunca y escapa texto para ZPL ^FD."""
+def _safe(text: str, max_len: int = 0) -> str:
+    """Escapa texto para ZPL ^FD (sin truncar si max_len=0)."""
     text = (text or "").strip()
     text = text.replace("^", "").replace("~", "")   # Caracteres reservados ZPL
-    return text[:max_len]
+    if max_len > 0:
+        return text[:max_len]
+    return text
+
+
+def _wrap_text(text: str, max_chars: int) -> List[str]:
+    """Divide texto en líneas respetando espacios, sin truncar."""
+    lines = []
+    while len(text) > max_chars:
+        cut_pos = text.rfind(" ", 0, max_chars)
+        if cut_pos == -1:
+            cut_pos = max_chars
+        lines.append(text[:cut_pos])
+        text = text[cut_pos:].lstrip()
+    if text:
+        lines.append(text)
+    return lines if lines else [""]
 
 
 def _dots(mm_val: float, dpi: int) -> int:
@@ -57,8 +73,8 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     Construye la etiqueta principal de 100 × 50 mm.
     Incluye:
       - Número de pedido (destacado arriba)
-      - Nombre completo
-      - Apellido
+      - Nombre completo (multilinea si es necesario)
+      - Apellido (multilinea si es necesario)
       - Ciudad
       - Dirección (multilinea si es necesaria)
       - Email
@@ -66,8 +82,10 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     """
     s = order.shipping
 
-    first_name = _safe(s.first_name, _MAX_NAME)
-    last_name  = _safe(s.last_name,  _MAX_NAME)
+    # No truncar nombres, dividir en líneas si es necesario
+    first_name_lines = _wrap_text(_safe(s.first_name), _MAX_NAME_LINE)
+    last_name_lines  = _wrap_text(_safe(s.last_name),  _MAX_NAME_LINE)
+
     city       = _safe(s.city,       _MAX_CITY)
     email      = _safe(s.email,      _MAX_EMAIL)
     phone      = _safe(s.phone,      _MAX_PHONE)
@@ -81,33 +99,63 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     margin_x = _dots(3, dpi)
     w        = _dots(100, dpi)
 
-    # Altura dinámica: base + extra por líneas de dirección adicionales
-    base_height = 50
-    extra_height = 4 * (len(addr_lines) - 1) if len(addr_lines) > 1 else 0
-    h = _dots(base_height + extra_height, dpi)
+    # Altura dinámica: calcular según cantidad de líneas
+    total_lines = (
+        1 +  # Pedido
+        len(first_name_lines) +
+        len(last_name_lines) +
+        1 +  # Ciudad
+        len(addr_lines) +
+        2    # Email + Teléfono
+    )
+    h = _dots(5 + total_lines * 5, dpi)  # Altura dinámica
 
-    # Posiciones Y
-    y_order = _dots(2,  dpi)
-    y_name  = _dots(8,  dpi)
-    y_last  = _dots(13, dpi)
-    y_city  = _dots(18, dpi)
-    y_addr  = _dots(23, dpi)
+    # Posiciones Y dinámicas
+    line_height = _dots(4.5, dpi)
+    y_current = _dots(2, dpi)
 
-    # Construir líneas de dirección
-    addr_section = []
-    line_height = _dots(4, dpi)
-    for i, line in enumerate(addr_lines):
+    # Líneas de ZPL
+    lines = []
+
+    # Pedido
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(5,dpi)},{_dots(5,dpi)}^FDPedido: {order_id}^FS")
+    y_current += _dots(6, dpi)
+
+    # Nombre (multilinea)
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDNombre: {first_name_lines[0]}^FS")
+    y_current += line_height
+    for extra_line in first_name_lines[1:]:
+        indent = _dots(12, dpi)
+        lines.append(f"^FO{indent},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{extra_line}^FS")
+        y_current += line_height
+
+    # Apellido (multilinea)
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDApellido: {last_name_lines[0]}^FS")
+    y_current += line_height
+    for extra_line in last_name_lines[1:]:
+        indent = _dots(12, dpi)
+        lines.append(f"^FO{indent},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{extra_line}^FS")
+        y_current += line_height
+
+    # Ciudad
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDCiudad: {city}^FS")
+    y_current += line_height
+
+    # Dirección (multilinea)
+    for i, addr_line in enumerate(addr_lines):
         if i == 0:
-            addr_section.append(f"^FO{margin_x},{y_addr}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDDirección: {line}^FS")
+            lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDDirección: {addr_line}^FS")
         else:
-            y_extra = y_addr + line_height * i
-            indent = _dots(15, dpi)  # Indentar líneas adicionales
-            addr_section.append(f"^FO{indent},{y_extra}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{line}^FS")
+            indent = _dots(15, dpi)
+            lines.append(f"^FO{indent},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{addr_line}^FS")
+        y_current += line_height
 
-    # Posiciones después de dirección
-    y_after_addr = y_addr + line_height * len(addr_lines)
-    y_email = y_after_addr
-    y_phone = y_email + _dots(5, dpi)
+    # Email
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDEmail: {email}^FS")
+    y_current += line_height
+
+    # Teléfono
+    lines.append(f"^FO{margin_x},{y_current}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDTeléfono: {phone}^FS")
 
     zpl = f"""\
 ^XA
@@ -115,16 +163,7 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
 ^LL{h}
 ^CI28
 
-^FO{margin_x},{y_order}^A0N,{_dots(5,dpi)},{_dots(5,dpi)}^FDPedido: {order_id}^FS
-
-^FO{margin_x},{y_name}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDNombre: {first_name}^FS
-^FO{margin_x},{y_last}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDApellido: {last_name}^FS
-^FO{margin_x},{y_city}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDCiudad: {city}^FS
-
-{"".join(addr_section)}
-
-^FO{margin_x},{y_email}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDEmail: {email}^FS
-^FO{margin_x},{y_phone}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDTeléfono: {phone}^FS
+{"".join(lines)}
 
 ^XZ"""
     return zpl
@@ -140,14 +179,7 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
         return ""
 
     # Dividir nota en líneas de máximo ~45 caracteres
-    lines = []
-    while len(note) > _MAX_NOTE_LINE:
-        cut_pos = note.rfind(" ", 0, _MAX_NOTE_LINE)
-        if cut_pos == -1:
-            cut_pos = _MAX_NOTE_LINE
-        lines.append(note[:cut_pos])
-        note = note[cut_pos:].lstrip()
-    lines.append(note)
+    lines = _wrap_text(_safe(note), _MAX_NOTE_LINE)
 
     # Dimensiones
     margin_x = _dots(3, dpi)
