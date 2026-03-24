@@ -60,7 +60,7 @@ from providers.woo_client import WooCommerceProvider
 from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
-from services.zpl_service import ZPLService, build_zpl
+from services.zpl_service import ZPLService, build_zpl_main, build_zpl_note
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
 from services.chilexpress_service import generate_chilexpress_csv
 
@@ -881,7 +881,14 @@ async def download_zpl(
                 detail=f"No se pudo obtener la etiqueta nativa de MercadoLibre: {exc}"
             )
     else:
-        zpl_str = build_zpl(order, dpi=settings.ZEBRA_DPI)
+        # Generar etiqueta principal
+        zpl_str = build_zpl_main(order, dpi=settings.ZEBRA_DPI)
+
+        # Si hay customer_note, agregar etiqueta adicional
+        if order.customer_note and order.customer_note.strip():
+            zpl_note = build_zpl_note(order, dpi=settings.ZEBRA_DPI)
+            if zpl_note:
+                zpl_str = zpl_str + "\n\n" + zpl_note
 
     await log_event(order_id, source, "zpl_download", "ZPL descargado manualmente para impresión de contingencia")
 

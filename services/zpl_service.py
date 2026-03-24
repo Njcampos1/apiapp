@@ -4,6 +4,10 @@ Servicio ZPL — Generación de etiquetas y envío por Socket TCP/IP.
 Formato de etiqueta: 10 × 5 cm (100 × 50 mm)
 Compatible con 203 DPI y 300 DPI (configurado vía ZEBRA_DPI en .env).
 
+Genera dos etiquetas por pedido:
+  1. Etiqueta principal: número de pedido, nombre, apellido, ciudad, dirección, email, teléfono
+  2. Etiqueta de nota (solo si existe customer_note): número de pedido + nota del cliente
+
 Protocolo de impresión: ZPL II enviado directamente al puerto 9100
 de la impresora Zebra mediante socket TCP sin estado persistente,
 equivalente al comportamiento de una app de escritorio.
@@ -17,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import textwrap
 from typing import Tuple
 
 from models.order import NormalizedOrder
@@ -25,11 +28,13 @@ from models.order import NormalizedOrder
 logger = logging.getLogger(__name__)
 
 # Anchos máximos de texto por campo (en caracteres ZPL ~^FD)
-_MAX_NAME    = 30
+_MAX_NAME    = 25  # Reducido para evitar desbordamiento
 _MAX_ADDR    = 35
 _MAX_CITY    = 25
 _MAX_PHONE   = 20
 _MAX_ID      = 20
+_MAX_EMAIL   = 30
+_MAX_NOTE_LINE = 45  # Para customer_note
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -47,60 +52,131 @@ def _dots(mm_val: float, dpi: int) -> int:
 
 # ── Generación ZPL ───────────────────────────────────────────────
 
-def build_zpl(order: NormalizedOrder, dpi: int = 300) -> str:
+def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     """
-    Construye el string ZPL II para una etiqueta de 100 × 50 mm.
+    Construye la etiqueta principal de 100 × 50 mm.
     Incluye:
-      - Nombre del destinatario (tipografía grande)
-      - Dirección + Ciudad
+      - Número de pedido (destacado arriba)
+      - Nombre completo
+      - Apellido
+      - Ciudad
+      - Dirección (multilinea si es necesaria)
+      - Email
       - Teléfono
-      - Número de pedido + fuente (texto + code128)
-      - Barcode Code128 del ID del pedido
     """
     s = order.shipping
 
-    name    = _safe(s.full_name,    _MAX_NAME)
-    addr    = _safe(s.full_address, _MAX_ADDR)
-    city    = _safe(s.city,         _MAX_CITY)
-    phone   = _safe(s.phone,        _MAX_PHONE)
-    order_id = _safe(str(order.id), _MAX_ID)
-    source  = order.source.value.upper()[:10]
+    first_name = _safe(s.first_name, _MAX_NAME)
+    last_name  = _safe(s.last_name,  _MAX_NAME)
+    city       = _safe(s.city,       _MAX_CITY)
+    email      = _safe(s.email,      _MAX_EMAIL)
+    phone      = _safe(s.phone,      _MAX_PHONE)
+    order_id   = _safe(str(order.id), _MAX_ID)
 
-    # Posiciones en dots
+    # Dirección puede ser multilinea (separar por comas)
+    addr_full = s.full_address
+    addr_lines = [line.strip() for line in addr_full.split(",") if line.strip()]
+
+    # Dimensiones de etiqueta
     margin_x = _dots(3, dpi)
     w        = _dots(100, dpi)
-    h        = _dots(50,  dpi)
 
-    # ── Columna izquierda: datos ──
-    y_name  = _dots(4,  dpi)
-    y_addr  = _dots(14, dpi)
-    y_city  = _dots(21, dpi)
-    y_phone = _dots(28, dpi)
-    y_order = _dots(35, dpi)
+    # Altura dinámica: base + extra por líneas de dirección adicionales
+    base_height = 50
+    extra_height = 4 * (len(addr_lines) - 1) if len(addr_lines) > 1 else 0
+    h = _dots(base_height + extra_height, dpi)
 
-    # ── Columna derecha: barcode ──
-    bc_x = _dots(70, dpi)
-    bc_y = _dots(3,  dpi)
-    bc_h = _dots(25, dpi)
+    # Posiciones Y
+    y_order = _dots(2,  dpi)
+    y_name  = _dots(8,  dpi)
+    y_last  = _dots(13, dpi)
+    y_city  = _dots(18, dpi)
+    y_addr  = _dots(23, dpi)
 
-    # Fuentes: A=pequeña, D=media, 0=grande (escalada)
+    # Construir líneas de dirección
+    addr_section = []
+    line_height = _dots(4, dpi)
+    for i, line in enumerate(addr_lines):
+        if i == 0:
+            addr_section.append(f"^FO{margin_x},{y_addr}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDDirección: {line}^FS")
+        else:
+            y_extra = y_addr + line_height * i
+            indent = _dots(15, dpi)  # Indentar líneas adicionales
+            addr_section.append(f"^FO{indent},{y_extra}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{line}^FS")
+
+    # Posiciones después de dirección
+    y_after_addr = y_addr + line_height * len(addr_lines)
+    y_email = y_after_addr
+    y_phone = y_email + _dots(5, dpi)
+
     zpl = f"""\
 ^XA
 ^PW{w}
 ^LL{h}
 ^CI28
 
-^FO{margin_x},{y_name}^A0N,{_dots(7,dpi)},{_dots(7,dpi)}^FD{name}^FS
+^FO{margin_x},{y_order}^A0N,{_dots(5,dpi)},{_dots(5,dpi)}^FDPedido: {order_id}^FS
 
-^FO{margin_x},{y_addr}^ADN,18,10^FD{addr}^FS
-^FO{margin_x},{y_city}^ADN,18,10^FD{city}^FS
-^FO{margin_x},{y_phone}^ADN,16,8^FDTel: {phone}^FS
-^FO{margin_x},{y_order}^ADN,14,7^FD{source} #{order_id}^FS
+^FO{margin_x},{y_name}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDNombre: {first_name}^FS
+^FO{margin_x},{y_last}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDApellido: {last_name}^FS
+^FO{margin_x},{y_city}^A0N,{_dots(4,dpi)},{_dots(4,dpi)}^FDCiudad: {city}^FS
 
-^FO{bc_x},{bc_y}^BCN,{bc_h},Y,N,N^FD{order_id}^FS
+{"".join(addr_section)}
+
+^FO{margin_x},{y_email}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDEmail: {email}^FS
+^FO{margin_x},{y_phone}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FDTeléfono: {phone}^FS
 
 ^XZ"""
-    return textwrap.dedent(zpl)
+    return zpl
+
+
+def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
+    """
+    Construye etiqueta secundaria para customer_note (solo si existe).
+    Formato: 100 × altura dinámica según cantidad de líneas.
+    """
+    note = (order.customer_note or "").strip()
+    if not note:
+        return ""
+
+    # Dividir nota en líneas de máximo ~45 caracteres
+    lines = []
+    while len(note) > _MAX_NOTE_LINE:
+        cut_pos = note.rfind(" ", 0, _MAX_NOTE_LINE)
+        if cut_pos == -1:
+            cut_pos = _MAX_NOTE_LINE
+        lines.append(note[:cut_pos])
+        note = note[cut_pos:].lstrip()
+    lines.append(note)
+
+    # Dimensiones
+    margin_x = _dots(3, dpi)
+    w        = _dots(100, dpi)
+    h        = _dots(7 + 4 * len(lines), dpi)
+
+    order_id = _safe(str(order.id), _MAX_ID)
+    y_title  = _dots(1, dpi)
+    y_line   = _dots(7, dpi)
+    line_height = _dots(4, dpi)
+
+    # Construir líneas de nota
+    note_lines = []
+    for i, line in enumerate(lines):
+        y = y_line + line_height * i
+        note_lines.append(f"^FO{margin_x},{y}^A0N,{_dots(3.5,dpi)},{_dots(3.5,dpi)}^FD{line}^FS")
+
+    zpl = f"""\
+^XA
+^PW{w}
+^LL{h}
+^CI28
+
+^FO{margin_x},{y_title}^A0N,{_dots(5,dpi)},{_dots(5,dpi)}^FDPedido {order_id} - Nota cliente:^FS
+
+{"".join(note_lines)}
+
+^XZ"""
+    return zpl
 
 
 # ── Comunicación TCP ─────────────────────────────────────────────
@@ -116,11 +192,27 @@ class ZPLService:
     ) -> Tuple[bool, str]:
         """
         Genera el ZPL y lo envía a la impresora por TCP.
+        Si hay customer_note, imprime dos etiquetas:
+          1. Etiqueta principal con datos del pedido
+          2. Etiqueta con la nota del cliente
         Retorna (True, "") o (False, mensaje_de_error).
         No lanza excepciones — todos los errores son capturados.
         """
-        zpl_str = build_zpl(order, dpi=self.dpi)
-        return await self._send(zpl_str)
+        # Etiqueta principal
+        zpl_main = build_zpl_main(order, dpi=self.dpi)
+        success, error = await self._send(zpl_main)
+        if not success:
+            return False, f"Error en etiqueta principal: {error}"
+
+        # Etiqueta de customer_note (si existe)
+        if order.customer_note and order.customer_note.strip():
+            zpl_note = build_zpl_note(order, dpi=self.dpi)
+            if zpl_note:
+                success_note, error_note = await self._send(zpl_note)
+                if not success_note:
+                    return False, f"Etiqueta principal OK, error en nota: {error_note}"
+
+        return True, ""
 
     async def _send(self, zpl: str) -> Tuple[bool, str]:
         """Abre conexión TCP, envía ZPL y cierra. Totalmente asíncrono."""
