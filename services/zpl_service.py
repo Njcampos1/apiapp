@@ -20,26 +20,23 @@ Manejo de errores:
 from __future__ import annotations
 
 import asyncio
-import math
 import logging
-from typing import Tuple, List
+from typing import List, Tuple
 
 from models.order import NormalizedOrder
 
 logger = logging.getLogger(__name__)
 
-# Anchos máximos de texto por campo (en caracteres ZPL ~^FD)
-_MAX_NAME_LINE = 30  # Caracteres por línea para nombre/apellido (sin truncar)
-_MAX_ADDR    = 35
-_MAX_CITY    = 25
-_MAX_PHONE   = 20
-_MAX_ID      = 20
-_MAX_EMAIL   = 35
-_MAX_NOTE_LINE = 45  # Para customer_note
+# Anchos máximos por línea (caracteres). Se usan para envolver texto, no truncar.
+_MAX_NAME_LINE = 24
+_MAX_ADDR_LINE = 24
+_MAX_CITY_LINE = 24
+_MAX_PHONE_LINE = 24
+_MAX_EMAIL_LINE = 24
+_MAX_NOTE_LINE = 34
 
 _LABEL_WIDTH_MM = 100.0
 _LABEL_HEIGHT_MM = 50.0
-_MIN_SCALE = 0.75
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -71,46 +68,15 @@ def _dots(mm_val: float, dpi: int) -> int:
     return round(mm_val * dpi / 25.4)
 
 
-def _fit_lines_to_budget(
-    first_name_lines: List[str],
-    last_name_lines: List[str],
-    addr_lines: List[str],
-    max_body_lines: int,
-) -> Tuple[List[str], List[str], List[str]]:
-    """Ajusta líneas para que entren en la etiqueta manteniendo contenido crítico."""
-    first = first_name_lines[:] if first_name_lines else [""]
-    last = last_name_lines[:] if last_name_lines else [""]
-    addr = addr_lines[:] if addr_lines else [""]
-
-    min_lines = 6  # nombre, apellido, ciudad, dirección, email, teléfono
-    budget = max(max_body_lines, min_lines)
-
-    def current_total() -> int:
-        return len(first) + len(last) + 1 + len(addr) + 2
-
-    trimmed_addr = False
-    trimmed_last = False
-    trimmed_first = False
-
-    while current_total() > budget and len(addr) > 1:
-        addr.pop()
-        trimmed_addr = True
-    while current_total() > budget and len(last) > 1:
-        last.pop()
-        trimmed_last = True
-    while current_total() > budget and len(first) > 1:
-        first.pop()
-        trimmed_first = True
-
-    # Marca visual mínima si hubo recorte.
-    if trimmed_addr and addr:
-        addr[-1] = addr[-1].rstrip(".") + "..."
-    if trimmed_last and last:
-        last[-1] = last[-1].rstrip(".") + "..."
-    if trimmed_first and first:
-        first[-1] = first[-1].rstrip(".") + "..."
-
-    return first, last, addr
+def _split_address_lines(address: str, max_chars: int) -> List[str]:
+    """Divide dirección por comas y envuelve cada tramo sin truncar."""
+    result: List[str] = []
+    for chunk in (address or "").split(","):
+        piece = _safe(chunk)
+        if not piece:
+            continue
+        result.extend(_wrap_text(piece, max_chars))
+    return result if result else [""]
 
 
 # ── Generación ZPL ───────────────────────────────────────────────
@@ -129,87 +95,73 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     """
     s = order.shipping
 
-    # No truncar nombres, dividir en líneas si es necesario
+    # No truncar campos: envolver en múltiples líneas.
     first_name_lines = _wrap_text(_safe(s.first_name), _MAX_NAME_LINE)
-    last_name_lines  = _wrap_text(_safe(s.last_name),  _MAX_NAME_LINE)
+    last_name_lines = _wrap_text(_safe(s.last_name), _MAX_NAME_LINE)
 
-    city       = _safe(s.city,       _MAX_CITY)
-    email      = _safe(s.email,      _MAX_EMAIL)
-    phone      = _safe(s.phone,      _MAX_PHONE)
-    order_id   = _safe(str(order.id), _MAX_ID)
+    city_lines = _wrap_text(_safe(s.city), _MAX_CITY_LINE)
+    email_lines = _wrap_text(_safe(s.email), _MAX_EMAIL_LINE)
+    phone_lines = _wrap_text(_safe(s.phone), _MAX_PHONE_LINE)
+    order_id = _safe(str(order.id))
 
-    # Dirección puede ser multilinea (separar por comas)
-    addr_full = s.full_address
-    addr_lines = [line.strip() for line in addr_full.split(",") if line.strip()]
+    # Dirección multilinea: separar por comas y envolver cada tramo.
+    addr_lines = _split_address_lines(s.full_address, _MAX_ADDR_LINE)
 
-    body_lines = len(first_name_lines) + len(last_name_lines) + 1 + len(addr_lines) + 2
-
-    # Ajuste de escala para mantener SIEMPRE 100x50 mm.
-    required_mm = 2.0 + 6.0 + (body_lines * 4.5) + 2.0
-    scale = min(1.0, _LABEL_HEIGHT_MM / required_mm)
-    scale = max(scale, _MIN_SCALE)
-
-    max_body_lines = max(1, math.floor((_LABEL_HEIGHT_MM - (2.0 + 6.0 * scale + 2.0)) / (4.5 * scale)))
-    first_name_lines, last_name_lines, addr_lines = _fit_lines_to_budget(
-        first_name_lines,
-        last_name_lines,
-        addr_lines,
-        max_body_lines,
+    body_lines = (
+        len(first_name_lines)
+        + len(last_name_lines)
+        + len(city_lines)
+        + len(addr_lines)
+        + len(email_lines)
+        + len(phone_lines)
     )
+
+    # Escala dinámica para que TODO el contenido entre en 100x50 mm sin recortes.
+    required_mm = 2.0 + 5.8 + (body_lines * 4.2) + 2.0
+    scale = min(1.0, _LABEL_HEIGHT_MM / required_mm)
 
     # Dimensiones de etiqueta fijas 100x50 mm.
     margin_x = _dots(3, dpi)
     w = _dots(_LABEL_WIDTH_MM, dpi)
     h = _dots(_LABEL_HEIGHT_MM, dpi)
 
-    title_font = _dots(5 * scale, dpi)
-    body_font = _dots(3.5 * scale, dpi)
-    title_step = _dots(6 * scale, dpi)
-    line_height = _dots(4.5 * scale, dpi)
+    title_font_h = max(1, _dots(4.6 * scale, dpi))
+    title_font_w = max(1, _dots(3.6 * scale, dpi))
+    body_font_h = max(1, _dots(3.2 * scale, dpi))
+    body_font_w = max(1, _dots(2.5 * scale, dpi))
+    title_step = max(1, _dots(5.8 * scale, dpi))
+    line_height = max(1, _dots(4.2 * scale, dpi))
     y_current = _dots(2, dpi)
 
     # Líneas de ZPL
     lines = []
 
+    def add_field(label: str, wrapped_values: List[str]) -> None:
+        nonlocal y_current
+        lines.append(
+            f"^FO{margin_x},{y_current}^A0N,{body_font_h},{body_font_w}^FD{label}: {wrapped_values[0]}^FS"
+        )
+        y_current += line_height
+        for extra_line in wrapped_values[1:]:
+            lines.append(
+                f"^FO{margin_x},{y_current}^A0N,{body_font_h},{body_font_w}^FD{extra_line}^FS"
+            )
+            y_current += line_height
+
     # Pedido
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{title_font},{title_font}^FDPedido: {order_id}^FS")
+    lines.append(
+        f"^FO{margin_x},{y_current}^A0N,{title_font_h},{title_font_w}^FDPedido: {order_id}^FS"
+    )
     y_current += title_step
 
-    # Nombre (multilinea)
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDNombre: {first_name_lines[0]}^FS")
-    y_current += line_height
-    for extra_line in first_name_lines[1:]:
-        indent = _dots(12, dpi)
-        lines.append(f"^FO{indent},{y_current}^A0N,{body_font},{body_font}^FD{extra_line}^FS")
-        y_current += line_height
+    add_field("Nombre", first_name_lines)
+    add_field("Apellido", last_name_lines)
+    add_field("Ciudad", city_lines)
+    add_field("Dirección", addr_lines)
+    add_field("Email", email_lines)
+    add_field("Teléfono", phone_lines)
 
-    # Apellido (multilinea)
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDApellido: {last_name_lines[0]}^FS")
-    y_current += line_height
-    for extra_line in last_name_lines[1:]:
-        indent = _dots(12, dpi)
-        lines.append(f"^FO{indent},{y_current}^A0N,{body_font},{body_font}^FD{extra_line}^FS")
-        y_current += line_height
-
-    # Ciudad
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDCiudad: {city}^FS")
-    y_current += line_height
-
-    # Dirección (multilinea)
-    for i, addr_line in enumerate(addr_lines):
-        if i == 0:
-            lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDDirección: {addr_line}^FS")
-        else:
-            indent = _dots(15, dpi)
-            lines.append(f"^FO{indent},{y_current}^A0N,{body_font},{body_font}^FD{addr_line}^FS")
-        y_current += line_height
-
-    # Email
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDEmail: {email}^FS")
-    y_current += line_height
-
-    # Teléfono
-    lines.append(f"^FO{margin_x},{y_current}^A0N,{body_font},{body_font}^FDTeléfono: {phone}^FS")
+    zpl_body = "\n".join(lines)
 
     zpl = f"""\
 ^XA
@@ -217,7 +169,7 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
 ^LL{h}
 ^CI28
 
-{"".join(lines)}
+{zpl_body}
 
 ^XZ"""
     return zpl
@@ -232,37 +184,44 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
     if not note:
         return ""
 
-    # Dividir nota en líneas de máximo ~45 caracteres
+    order_id = _safe(str(order.id))
+
+    # Dividir nota en líneas sin truncar.
     lines = _wrap_text(_safe(note), _MAX_NOTE_LINE)
+    title_lines = _wrap_text(f"Pedido {order_id} - Nota cliente:", _MAX_NOTE_LINE)
 
-    # Ajuste de escala para mantener SIEMPRE 100x50 mm.
-    required_mm = 1.0 + 6.0 + (4.0 * len(lines)) + 2.0
+    # Escala dinámica para que TODO el contenido entre en 100x50 mm sin recortes.
+    required_mm = 1.0 + (4.8 * len(title_lines)) + (4.0 * len(lines)) + 2.0
     scale = min(1.0, _LABEL_HEIGHT_MM / required_mm)
-    scale = max(scale, _MIN_SCALE)
-
-    max_note_lines = max(1, math.floor((_LABEL_HEIGHT_MM - (7.0 * scale + 2.0)) / (4.0 * scale)))
-    if len(lines) > max_note_lines:
-        lines = lines[:max_note_lines]
-        if lines:
-            lines[-1] = lines[-1].rstrip(".") + "..."
 
     # Dimensiones fijas
     margin_x = _dots(3, dpi)
     w = _dots(_LABEL_WIDTH_MM, dpi)
     h = _dots(_LABEL_HEIGHT_MM, dpi)
 
-    order_id = _safe(str(order.id), _MAX_ID)
-    title_font = _dots(5 * scale, dpi)
-    body_font = _dots(3.5 * scale, dpi)
-    y_title = _dots(1, dpi)
-    y_line = _dots(7 * scale, dpi)
-    line_height = _dots(4 * scale, dpi)
+    title_font_h = max(1, _dots(4.2 * scale, dpi))
+    title_font_w = max(1, _dots(3.2 * scale, dpi))
+    body_font_h = max(1, _dots(3.0 * scale, dpi))
+    body_font_w = max(1, _dots(2.3 * scale, dpi))
+    y_current = _dots(1, dpi)
+    title_line_height = max(1, _dots(4.8 * scale, dpi))
+    line_height = max(1, _dots(4.0 * scale, dpi))
 
     # Construir líneas de nota
-    note_lines = []
+    note_lines: List[str] = []
+    for line in title_lines:
+        note_lines.append(
+            f"^FO{margin_x},{y_current}^A0N,{title_font_h},{title_font_w}^FD{line}^FS"
+        )
+        y_current += title_line_height
+
     for i, line in enumerate(lines):
-        y = y_line + line_height * i
-        note_lines.append(f"^FO{margin_x},{y}^A0N,{body_font},{body_font}^FD{line}^FS")
+        y = y_current + line_height * i
+        note_lines.append(
+            f"^FO{margin_x},{y}^A0N,{body_font_h},{body_font_w}^FD{line}^FS"
+        )
+
+    zpl_body = "\n".join(note_lines)
 
     zpl = f"""\
 ^XA
@@ -270,9 +229,7 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
 ^LL{h}
 ^CI28
 
-^FO{margin_x},{y_title}^A0N,{title_font},{title_font}^FDPedido {order_id} - Nota cliente:^FS
-
-{"".join(note_lines)}
+{zpl_body}
 
 ^XZ"""
     return zpl
