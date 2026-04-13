@@ -81,7 +81,7 @@ def _split_address_lines(address: str, max_chars: int) -> List[str]:
 
 # ── Generación ZPL ───────────────────────────────────────────────
 
-def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
+def build_zpl_main(order: NormalizedOrder, dpi: int = 203) -> str:
     """
     Construye la etiqueta principal de 100 × 50 mm.
     Incluye:
@@ -116,9 +116,10 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
         + len(phone_lines)
     )
 
-    # Escala dinámica para que TODO el contenido entre en 100x50 mm sin recortes.
+    # Escala dinámica con margen de seguridad inferior para evitar cortes físicos.
+    usable_height_mm = _LABEL_HEIGHT_MM - 2.0
     required_mm = 2.0 + 5.8 + (body_lines * 4.2) + 2.0
-    scale = min(1.0, _LABEL_HEIGHT_MM / required_mm)
+    scale = min(1.0, usable_height_mm / required_mm)
 
     # Dimensiones de etiqueta fijas 100x50 mm.
     margin_x = _dots(3, dpi)
@@ -138,13 +139,14 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
 
     def add_field(label: str, wrapped_values: List[str]) -> None:
         nonlocal y_current
+        continuation_indent = margin_x + 18
         lines.append(
             f"^FO{margin_x},{y_current}^A0N,{body_font_h},{body_font_w}^FD{label}: {wrapped_values[0]}^FS"
         )
         y_current += line_height
         for extra_line in wrapped_values[1:]:
             lines.append(
-                f"^FO{margin_x},{y_current}^A0N,{body_font_h},{body_font_w}^FD{extra_line}^FS"
+                f"^FO{continuation_indent},{y_current}^A0N,{body_font_h},{body_font_w}^FD{extra_line}^FS"
             )
             y_current += line_height
 
@@ -175,7 +177,7 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 300) -> str:
     return zpl
 
 
-def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
+def build_zpl_note(order: NormalizedOrder, dpi: int = 203) -> str:
     """
     Construye etiqueta secundaria para customer_note (solo si existe).
     Formato: 100 × altura dinámica según cantidad de líneas.
@@ -190,9 +192,10 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
     lines = _wrap_text(_safe(note), _MAX_NOTE_LINE)
     title_lines = _wrap_text(f"Pedido {order_id} - Nota cliente:", _MAX_NOTE_LINE)
 
-    # Escala dinámica para que TODO el contenido entre en 100x50 mm sin recortes.
+    # Escala dinámica con margen de seguridad inferior para evitar cortes físicos.
+    usable_height_mm = _LABEL_HEIGHT_MM - 2.0
     required_mm = 1.0 + (4.8 * len(title_lines)) + (4.0 * len(lines)) + 2.0
-    scale = min(1.0, _LABEL_HEIGHT_MM / required_mm)
+    scale = min(1.0, usable_height_mm / required_mm)
 
     # Dimensiones fijas
     margin_x = _dots(3, dpi)
@@ -238,7 +241,7 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 300) -> str:
 # ── Comunicación TCP ─────────────────────────────────────────────
 
 class ZPLService:
-    def __init__(self, host: str, port: int = 9100, dpi: int = 300) -> None:
+    def __init__(self, host: str, port: int = 9100, dpi: int = 203) -> None:
         self.host = host
         self.port = port
         self.dpi  = dpi
