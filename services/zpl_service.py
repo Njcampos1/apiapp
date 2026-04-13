@@ -117,21 +117,27 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 203) -> str:
     )
 
     # Escala dinámica con margen de seguridad inferior para evitar cortes físicos.
+    title_font_mm = 5.5
+    body_font_mm = 4.0
+    line_height_mm = 5.0
+    title_step_mm = 6.5
+    top_margin_mm = 2.0
+    bottom_margin_mm = 2.0
     usable_height_mm = _LABEL_HEIGHT_MM - 2.0
-    required_mm = 2.0 + 5.8 + (body_lines * 4.2) + 2.0
+    required_mm = top_margin_mm + title_step_mm + (body_lines * line_height_mm) + bottom_margin_mm
     scale = min(1.0, usable_height_mm / required_mm)
 
     # Dimensiones de etiqueta fijas 100x50 mm.
-    margin_x = _dots(3, dpi)
-    w = _dots(_LABEL_WIDTH_MM, dpi)
+    margin_x = _dots(5, dpi)
+    w = _dots(100.0, dpi)
     h = _dots(_LABEL_HEIGHT_MM, dpi)
 
-    title_font_h = max(1, _dots(4.6 * scale, dpi))
-    title_font_w = max(1, _dots(3.6 * scale, dpi))
-    body_font_h = max(1, _dots(3.2 * scale, dpi))
-    body_font_w = max(1, _dots(2.5 * scale, dpi))
-    title_step = max(1, _dots(5.8 * scale, dpi))
-    line_height = max(1, _dots(4.2 * scale, dpi))
+    title_font_h = max(1, _dots(title_font_mm * scale, dpi))
+    title_font_w = max(1, _dots((title_font_mm * 0.78) * scale, dpi))
+    body_font_h = max(1, _dots(body_font_mm * scale, dpi))
+    body_font_w = max(1, _dots((body_font_mm * 0.72) * scale, dpi))
+    title_step = max(1, _dots(title_step_mm * scale, dpi))
+    line_height = max(1, _dots(line_height_mm * scale, dpi))
     y_current = _dots(2, dpi)
 
     # Líneas de ZPL
@@ -167,6 +173,9 @@ def build_zpl_main(order: NormalizedOrder, dpi: int = 203) -> str:
 
     zpl = f"""\
 ^XA
+^MTT
+^MMT
+^JUS
 ^PW{w}
 ^LL{h}
 ^CI28
@@ -193,22 +202,32 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 203) -> str:
     title_lines = _wrap_text(f"Pedido {order_id} - Nota cliente:", _MAX_NOTE_LINE)
 
     # Escala dinámica con margen de seguridad inferior para evitar cortes físicos.
+    title_font_mm = 5.5
+    body_font_mm = 4.0
+    line_height_mm = 5.0
+    top_margin_mm = 1.0
+    bottom_margin_mm = 2.0
     usable_height_mm = _LABEL_HEIGHT_MM - 2.0
-    required_mm = 1.0 + (4.8 * len(title_lines)) + (4.0 * len(lines)) + 2.0
+    required_mm = (
+        top_margin_mm
+        + (line_height_mm * len(title_lines))
+        + (line_height_mm * len(lines))
+        + bottom_margin_mm
+    )
     scale = min(1.0, usable_height_mm / required_mm)
 
     # Dimensiones fijas
-    margin_x = _dots(3, dpi)
-    w = _dots(_LABEL_WIDTH_MM, dpi)
+    margin_x = _dots(5, dpi)
+    w = _dots(100.0, dpi)
     h = _dots(_LABEL_HEIGHT_MM, dpi)
 
-    title_font_h = max(1, _dots(4.2 * scale, dpi))
-    title_font_w = max(1, _dots(3.2 * scale, dpi))
-    body_font_h = max(1, _dots(3.0 * scale, dpi))
-    body_font_w = max(1, _dots(2.3 * scale, dpi))
+    title_font_h = max(1, _dots(title_font_mm * scale, dpi))
+    title_font_w = max(1, _dots((title_font_mm * 0.78) * scale, dpi))
+    body_font_h = max(1, _dots(body_font_mm * scale, dpi))
+    body_font_w = max(1, _dots((body_font_mm * 0.72) * scale, dpi))
     y_current = _dots(1, dpi)
-    title_line_height = max(1, _dots(4.8 * scale, dpi))
-    line_height = max(1, _dots(4.0 * scale, dpi))
+    title_line_height = max(1, _dots(line_height_mm * scale, dpi))
+    line_height = max(1, _dots(line_height_mm * scale, dpi))
 
     # Construir líneas de nota
     note_lines: List[str] = []
@@ -228,6 +247,9 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 203) -> str:
 
     zpl = f"""\
 ^XA
+^MTT
+^MMT
+^JUS
 ^PW{w}
 ^LL{h}
 ^CI28
