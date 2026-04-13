@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Comunas de región metropolitana (normalized)
 RM_STATES = {"rm", "metropolitana", "región metropolitana", "region metropolitana"}
+DECLARED_PRODUCT_VALUE = "50000"
 
 
 def _normalize_state(state: str) -> str:
@@ -76,6 +77,32 @@ def _parse_address(address: str) -> Tuple[str, str]:
 
     # Si no hay número reconocible, toda la dirección es la calle
     return (address.strip(), "S/N")
+
+
+def _normalize_phone(phone: str) -> str:
+    """
+    Normaliza teléfonos chilenos al formato de 9 dígitos (ej: 931311932).
+
+    Corrige formatos frecuentes:
+    - +56931311932 -> 931311932
+    - 56931311932 -> 931311932
+    """
+    if not phone:
+        return ""
+
+    # Mantener solo dígitos para limpiar prefijos como '+' y separadores.
+    digits = re.sub(r"\D", "", phone)
+
+    # Formato internacional chileno (56 + 9 dígitos)
+    if len(digits) == 11 and digits.startswith("569"):
+        return digits[2:]
+
+    # Si ya viene en formato local de 9 dígitos, se respeta.
+    if len(digits) == 9 and digits.startswith("9"):
+        return digits
+
+    # Fallback: retornar solo dígitos para no romper exportación.
+    return digits
 
 
 def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
@@ -150,6 +177,7 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
     # Escribir filas
     for order in regional_orders:
         calle, numero = _parse_address(order.shipping.address_1)
+        phone = _normalize_phone(order.shipping.phone)
 
         row = {
             "PRODUCTO": "3",
@@ -166,9 +194,9 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
             "LARGO": "40",
             "CARGOEMPRESA": "",
             "MONTO_COBRO_COD": "",
-            "VALOR_DECLARADO_PRODUCTO": "",
+            "VALOR_DECLARADO_PRODUCTO": DECLARED_PRODUCT_VALUE,
             "EMAIL": order.shipping.email,
-            "CELULAR": order.shipping.phone,
+            "CELULAR": phone,
             "TIPO_DE_DIRECCION": "2",
             "INFOADICIONAL": "",
             "AGRAGRUPADA": "",
