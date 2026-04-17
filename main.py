@@ -1060,7 +1060,34 @@ async def print_label(
         port=settings.ZEBRA_PORT,
         dpi=settings.ZEBRA_DPI,
     )
-    print_ok, print_msg = await zpl_svc.print_label(order)
+
+    if source == OrderSource.MERCADOLIBRE.value:
+        meli: MeliProvider = provider  # type: ignore[assignment]
+        try:
+            native_zpl = await meli.get_native_zpl(order_id)
+        except RuntimeError as exc:
+            await log_event(order_id, source, "label_error", str(exc))
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "No se pudo obtener la etiqueta nativa desde Mercado Libre",
+                    "reason": str(exc),
+                },
+            )
+        except Exception as exc:
+            logger.exception("Error inesperado obteniendo ZPL nativo de MeLi para pedido %s", order_id)
+            await log_event(order_id, source, "label_error", str(exc))
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "Error inesperado obteniendo etiqueta nativa desde Mercado Libre",
+                    "reason": str(exc),
+                },
+            )
+
+        print_ok, print_msg = await zpl_svc._send(native_zpl)
+    else:
+        print_ok, print_msg = await zpl_svc.print_label(order)
 
     if not print_ok:
         await log_event(order_id, source, "label_error", print_msg)
