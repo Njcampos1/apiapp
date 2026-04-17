@@ -5,7 +5,8 @@ Reglas de negocio:
   - Courier: 'Rocket' si la comuna está en data/rm.json, 'Chilexpress' en caso contrario.
   - Chocolate: items cuyo SKU pertenece a CHOCOLATE_SKUS.
   - Cafe: todos los demás SKUs.
-  - Cobertor / Detergente: items cuyo nombre contiene la palabra (case-insensitive).
+    - Cobertor: items cuyo nombre contiene la palabra (case-insensitive).
+    - Detergente 60 / 35: cálculo por SKU específico, con fallback por nombre.
 """
 from __future__ import annotations
 
@@ -37,6 +38,20 @@ CHOCOLATE_SKUS: frozenset[str] = frozenset({
 
 _RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
 _SKU_JSON_PATH = Path(__file__).parent.parent / "data" / "skus.json"
+
+DETERGENTE_35_SKU_MULTIPLIERS: dict[str, int] = {
+    "203193": 1,
+    "203195": 2,
+    "203196": 4,
+}
+
+DETERGENTE_60_SKU_MULTIPLIERS: dict[str, int] = {
+    "203192": 1,
+    "203194": 2,
+    "203198": 3,
+}
+
+DETERGENTE_MIXED_SKU = "203197"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,6 +199,45 @@ def _qty_by_name(order: NormalizedOrder, keyword: str) -> int:
     )
 
 
+def _qty_detergentes(order: NormalizedOrder) -> tuple[int, int]:
+    """
+    Devuelve (det60, det35) según SKUs de detergente.
+
+    Reglas:
+    - 35: 203193→1, 203195→2, 203196→4 por unidad.
+    - 60: 203192→1, 203194→2, 203198→3 por unidad.
+    - Mixto 203197: suma 1 a det60 y 1 a det35 por unidad.
+
+    Fallback:
+    - Si no hay SKUs explícitos y existe detergente por nombre,
+      asigna todo el total detectado a Detergente 60.
+    """
+    det60 = 0
+    det35 = 0
+
+    for item in order.items:
+        sku = item.sku
+        qty = item.quantity
+
+        if sku in DETERGENTE_35_SKU_MULTIPLIERS:
+            det35 += qty * DETERGENTE_35_SKU_MULTIPLIERS[sku]
+            continue
+
+        if sku in DETERGENTE_60_SKU_MULTIPLIERS:
+            det60 += qty * DETERGENTE_60_SKU_MULTIPLIERS[sku]
+            continue
+
+        if sku == DETERGENTE_MIXED_SKU:
+            det60 += qty
+            det35 += qty
+
+    detergente_fallback = _qty_by_name(order, "detergente")
+    if det60 == 0 and det35 == 0 and detergente_fallback > 0:
+        det60 = int(detergente_fallback)
+
+    return int(det60), int(det35)
+
+
 # ── Función principal ─────────────────────────────────────────────────────────
 
 def generate_excel(orders: List[NormalizedOrder]) -> bytes:
@@ -215,6 +269,8 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
         elif order.completed_at:
             fecha_etiqueta_str = order.completed_at.isoformat()
 
+        det60, det35 = _qty_detergentes(order)
+
         rows.append({
             "Página":           order.source.value,
             "Cliente":          order.shipping.full_name,
@@ -226,7 +282,8 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Seguimiento":      order.platform_meta.get("tracking_number", ""),
             "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),
             "Cobertor":         _qty_by_name(order, "cobertor"),
-            "Detergente":       _qty_by_name(order, "detergente"),
+            "Detergente 60":    det60,
+            "Detergente 35":    det35,
             "Chocolate":        _qty_chocolate(order, sku_multipliers, unit_skus),
             "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus),
             "Fecha_Etiqueta":   fecha_etiqueta_str,
@@ -235,7 +292,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     df = pd.DataFrame(rows, columns=[
         "Página", "Cliente", "Dirección", "Comuna", "Factura",
         "N° Pedido", "Valor", "Seguimiento", "Despacho",
-        "Cobertor", "Detergente", "Chocolate", "Cafe",
+        "Cobertor", "Detergente 60", "Detergente 35", "Chocolate", "Cafe",
         "Fecha_Etiqueta",
     ])
 
