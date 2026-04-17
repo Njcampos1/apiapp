@@ -3,7 +3,7 @@ Servicio de generación de PDF de picking.
 Produce una hoja A4 con:
   - Encabezado con número y fuente del pedido
   - Tabla de ítemes a preparar (eco-tinta: sin fondos oscuros ni rellenos)
-  - Código de barras Code128 del ID del pedido
+    - Código de barras Code128 del identificador visible del pedido
   - Datos de envío del destinatario
   - Nota del cliente siempre visible si existe
 """
@@ -122,7 +122,8 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
         elements.append(Spacer(1, 0.3 * cm))
 
     # ── Layout dos columnas: datos envío + código de barras ──────
-    barcode_obj = _build_barcode(order.id, height_cm=2.5)
+    display_id = order.display_id
+    barcode_obj = _build_barcode(display_id, height_cm=2.5)
 
     shipping = order.shipping
     info_data = [
@@ -145,7 +146,7 @@ def _build_order_elements(order: NormalizedOrder, styles) -> list:
     )
 
     barcode_caption = Table(
-        [[barcode_obj], [Paragraph(order.display_id, style_center)]],
+        [[barcode_obj], [Paragraph(display_id, style_center)]],
         colWidths=["100%"],
         style=TableStyle([
             ("ALIGN",        (0, 0), (-1, -1), "CENTER"),

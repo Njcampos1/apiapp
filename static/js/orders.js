@@ -264,6 +264,10 @@ function buildOrderCard(order) {
       ? 'bg-yellow-400'
       : 'bg-gray-400';
 
+  const displayId = (isMeli && meta.shipping_id)
+    ? String(meta.shipping_id)
+    : order.id;
+
   // Desplegable de productos (solo WooCommerce)
   const hasPack = order.items && order.items.some(item => item.is_pack === true);
   const productsDropdown = (!isMeli && order.items && order.items.length > 0)
@@ -324,7 +328,7 @@ function buildOrderCard(order) {
         </div>
         <span class="text-xs text-coffee-400 ${showCheckbox ? 'pr-7' : ''}">${dateStr}</span>
       </div>
-      <p class="text-2xl font-black text-coffee-900 mb-3 tracking-tight">#${order.id}</p>
+      <p class="text-2xl font-black text-coffee-900 mb-3 tracking-tight">#${displayId}</p>
       <div class="space-y-1 mb-4">
         <div class="flex items-center gap-2 text-sm">
           <svg class="w-4 h-4 text-coffee-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -89,7 +89,11 @@ class NormalizedOrder(BaseModel):
 
     @property
     def display_id(self) -> str:
-        return f"#{self.id}"
+        if self.source == OrderSource.MERCADOLIBRE:
+            shipping_id = self.platform_meta.get("shipping_id")
+            if shipping_id is not None and str(shipping_id).strip():
+                return str(shipping_id)
+        return str(self.id)
 
     @property
     def item_count(self) -> int:

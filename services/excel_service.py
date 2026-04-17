@@ -277,7 +277,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Dirección":        order.shipping.full_address,
             "Comuna":           ciudad,
             "Factura":          order.platform_meta.get("invoice", ""),
-            "N° Pedido":        order.id,
+            "N° Pedido":        order.display_id,
             "Valor":            order.total,
             "Seguimiento":      order.platform_meta.get("tracking_number", ""),
             "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),
