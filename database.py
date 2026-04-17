@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS manifests (
 );
 """
 
+CREATE_USERS_TABLE = """
+CREATE TABLE IF NOT EXISTS users (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT NOT NULL UNIQUE,
+    hashed_password TEXT NOT NULL
+);
+"""
+
 
 async def init_db() -> None:
     """Crea las tablas si no existen y aplica migraciones pendientes."""
@@ -70,6 +78,7 @@ async def init_db() -> None:
         await db.execute(CREATE_EVENTS_TABLE)
         await db.execute(CREATE_MELI_TOKENS_TABLE)
         await db.execute(CREATE_MANIFESTS_TABLE)
+        await db.execute(CREATE_USERS_TABLE)
         await db.commit()
         # Migración: añadir completed_at si la columna aún no existe
         try:
@@ -255,6 +264,79 @@ async def get_completed_orders() -> List[NormalizedOrder]:
         except Exception as exc:
             logger.warning("No se pudo deserializar pedido para Excel: %s", exc)
     return results
+
+
+class UserRow(TypedDict):
+    id: int
+    username: str
+    hashed_password: str
+
+
+class PublicUserRow(TypedDict):
+    id: int
+    username: str
+
+
+async def get_user_by_username(username: str) -> Optional[UserRow]:
+    """Busca un usuario por username."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, username, hashed_password FROM users WHERE username = ?",
+            (username,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return UserRow(
+        id=row["id"],
+        username=row["username"],
+        hashed_password=row["hashed_password"],
+    )
+
+
+async def create_user(username: str, hashed_password: str) -> int:
+    """Crea un usuario y devuelve su ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO users (username, hashed_password) VALUES (?, ?)",
+            (username, hashed_password),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_all_users() -> List[PublicUserRow]:
+    """Lista todos los usuarios sin exponer contraseñas."""
+    users: List[PublicUserRow] = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, username FROM users ORDER BY username ASC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    for row in rows:
+        users.append(
+            PublicUserRow(
+                id=row["id"],
+                username=row["username"],
+            )
+        )
+
+    return users
+
+
+async def ensure_default_admin_user(username: str, hashed_password: str) -> None:
+    """Crea el usuario admin por defecto si aún no existe."""
+    existing = await get_user_by_username(username)
+    if existing:
+        return
+
+    await create_user(username, hashed_password)
+    logger.info("Usuario administrador por defecto creado: %s", username)
 
 
 # ── Tokens de Mercado Libre ──────────────────────────────────────────────────

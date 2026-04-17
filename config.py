@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     APP_PORT:   int = 8000
     DEBUG:      bool = False
     DB_PATH:    str = "pedidos.db"
+    SECRET_KEY: str = "change-this-in-production"
+    JWT_EXPIRE_MINUTES: int = 720
+    DEFAULT_ADMIN_USERNAME: str = "admin"
+    DEFAULT_ADMIN_PASSWORD: str = "admin123"
 
     # ── Azure (no requerido en local) ─────────────────────────────
     AZURE_REGISTRY:   str = ""

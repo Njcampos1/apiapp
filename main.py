@@ -26,22 +26,31 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import zipfile
 
 import httpx
+import jwt
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from jwt import InvalidTokenError
+from passlib.context import CryptContext
+from pydantic import BaseModel, Field
 
 from config import settings
 from database import (
+    create_user,
+    ensure_default_admin_user,
+    get_all_users,
+    get_user_by_username,
     init_db,
     upsert_order,
     log_event,
@@ -76,6 +85,87 @@ logger = logging.getLogger(__name__)
 ProviderRegistry = Dict[str, BaseOrderProvider]
 
 _providers: ProviderRegistry = {}
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+bearer_scheme = HTTPBearer(auto_error=False)
+JWT_ALGORITHM = "HS256"
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(username: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+    role = "admin" if username == settings.DEFAULT_ADMIN_USERNAME else "user"
+    payload = {
+        "sub": username,
+        "role": role,
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> dict[str, Any]:
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No autenticado",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise unauthorized
+
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except InvalidTokenError:
+        raise unauthorized
+
+    username = payload.get("sub")
+    if not isinstance(username, str) or not username:
+        raise unauthorized
+
+    user = await get_user_by_username(username)
+    if user is None:
+        raise unauthorized
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "is_admin": user["username"] == settings.DEFAULT_ADMIN_USERNAME,
+    }
+
+
+async def get_admin_user(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    if not current_user.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido a administrador",
+        )
+    return current_user
 
 
 def build_providers() -> ProviderRegistry:
@@ -130,6 +220,19 @@ def get_provider(source: str) -> BaseOrderProvider:
 async def lifespan(app: FastAPI):
     global _providers
     await init_db()
+
+    if not settings.SECRET_KEY.strip():
+        raise RuntimeError("SECRET_KEY no está configurada. Define una clave segura en .env")
+
+    if settings.DEFAULT_ADMIN_PASSWORD == "admin123":
+        logger.warning(
+            "Se está usando DEFAULT_ADMIN_PASSWORD por defecto. Cámbiala en producción."
+        )
+    await ensure_default_admin_user(
+        settings.DEFAULT_ADMIN_USERNAME,
+        hash_password(settings.DEFAULT_ADMIN_PASSWORD),
+    )
+
     _providers = build_providers()
     logger.info("App iniciada con %d proveedor(es)", len(_providers))
     yield
@@ -181,8 +284,53 @@ async def health():
     }
 
 
+@app.post("/api/login", tags=["auth"])
+async def login(payload: LoginRequest):
+    user = await get_user_by_username(payload.username)
+    if not user or not verify_password(payload.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+
+    access_token = create_access_token(user["username"])
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "is_admin": user["username"] == settings.DEFAULT_ADMIN_USERNAME,
+    }
+
+
+@app.post("/api/users", tags=["users"], response_model=UserResponse)
+async def create_user_endpoint(
+    payload: UserCreate,
+    _admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    existing_user = await get_user_by_username(payload.username)
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El usuario ya existe",
+        )
+
+    user_id = await create_user(
+        username=payload.username,
+        hashed_password=hash_password(payload.password),
+    )
+
+    return UserResponse(id=user_id, username=payload.username)
+
+
+@app.get("/api/users", tags=["users"], response_model=list[UserResponse])
+async def list_users_endpoint(
+    _admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    users = await get_all_users()
+    return [UserResponse(id=u["id"], username=u["username"]) for u in users]
+
+
 @app.get("/api/printer/test", tags=["infra"])
-async def printer_test():
+async def printer_test(_current_user: dict[str, Any] = Depends(get_current_user)):
     zpl_svc = ZPLService(
         host=settings.ZEBRA_IP,
         port=settings.ZEBRA_PORT,
@@ -197,6 +345,7 @@ async def printer_test():
 async def meli_oauth_callback(
     code: str = Query(..., description="Código de autorización recibido de Mercado Libre"),
     state: Optional[str] = Query(default=None),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Endpoint que recibe el authorization code tras la autorización manual
@@ -260,7 +409,7 @@ async def spa(request: Request):
 
 # ── Pedidos — Lectura ────────────────────────────────────────────
 @app.get("/api/orders", tags=["orders"])
-async def list_orders():
+async def list_orders(_current_user: dict[str, Any] = Depends(get_current_user)):
     """
     Agrega pedidos 'processing' de todos los proveedores configurados, más
     los pedidos WooCommerce en estado 'preparing' (hojas impresas recuperables).
@@ -323,7 +472,7 @@ async def list_orders():
 
 
 @app.get("/api/orders/export-all", tags=["orders"])
-async def export_all_orders():
+async def export_all_orders(_current_user: dict[str, Any] = Depends(get_current_user)):
     """
     Descarga masiva de picking:
     1. Obtiene todos los pedidos en estado 'processing' de WooCommerce.
@@ -389,7 +538,7 @@ async def export_all_orders():
 
 
 @app.get("/api/orders/export-excel", tags=["orders"])
-async def export_excel():
+async def export_excel(_current_user: dict[str, Any] = Depends(get_current_user)):
     """
     Genera y descarga el reporte Excel de todos los pedidos completados
     registrados en la base de datos local.
@@ -421,7 +570,7 @@ async def export_excel():
 
 # ── Manifiestos (Lotes de Despacho) ──────────────────────────────
 @app.post("/api/manifests/close", tags=["manifests"])
-async def close_daily_manifest():
+async def close_daily_manifest(_current_user: dict[str, Any] = Depends(get_current_user)):
     """
     Cierra el manifest abierto actual y genera un ZIP con:
     - Excel de todos los pedidos del manifest
@@ -529,7 +678,7 @@ async def close_daily_manifest():
 
 
 @app.get("/api/manifests/current", tags=["manifests"])
-async def get_current_manifest():
+async def get_current_manifest(_current_user: dict[str, Any] = Depends(get_current_user)):
     """
     Devuelve información del manifest abierto actual.
     Útil para mostrar en el frontend cuántos pedidos lleva el día.
@@ -557,6 +706,7 @@ async def bulk_meli_zpl(
         ...,
         description="IDs de pedidos MeLi separados por coma, ej: 123456789,987654321",
     ),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Descarga un único archivo .txt con las etiquetas ZPL nativas de Mercado Libre
@@ -719,6 +869,7 @@ async def bulk_meli_pdf(
         ...,
         description="IDs de pedidos MeLi separados por coma, ej: 123456789,987654321",
     ),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Descarga un único PDF multipágina con las hojas de picking de los pedidos
@@ -853,6 +1004,7 @@ async def bulk_meli_pdf(
 async def download_zpl(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Genera y descarga la etiqueta ZPL como archivo .txt.
@@ -906,6 +1058,7 @@ async def set_order_status(
     order_id: str,
     new_status: str = Query(..., description="processing | completed | cancelled"),
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     Cambia el estado de un pedido manualmente.
@@ -961,6 +1114,7 @@ async def set_order_status(
 async def get_order(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """Retorna el detalle normalizado de un pedido por ID."""
     provider = get_provider(source)
@@ -1015,6 +1169,7 @@ async def get_order(
 async def prepare_order(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     1. Obtiene el pedido desde la plataforma.
@@ -1069,6 +1224,7 @@ async def prepare_order(
 async def print_label(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
+    _current_user: dict[str, Any] = Depends(get_current_user),
 ):
     """
     1. Obtiene el pedido.

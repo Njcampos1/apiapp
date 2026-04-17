@@ -7,6 +7,59 @@
  * - APIs de impresora y etiquetado
  */
 
+const PUBLIC_API_ROUTES = new Set([
+  '/api/login',
+  '/api/health',
+]);
+
+const _nativeFetch = window.fetch.bind(window);
+
+function getRequestPath(input) {
+  if (typeof input === 'string') {
+    return new URL(input, window.location.origin).pathname;
+  }
+
+  if (input instanceof Request) {
+    return new URL(input.url, window.location.origin).pathname;
+  }
+
+  return '';
+}
+
+function isProtectedApiPath(pathname) {
+  return pathname.startsWith('/api/') && !PUBLIC_API_ROUTES.has(pathname);
+}
+
+async function apiFetch(input, init = {}) {
+  const pathname = getRequestPath(input);
+  const protectedPath = isProtectedApiPath(pathname);
+  const headers = new Headers(init.headers || {});
+
+  if (protectedPath) {
+    const token = localStorage.getItem('jwt_token');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+
+  const response = await _nativeFetch(input, {
+    ...init,
+    headers,
+  });
+
+  if (protectedPath && response.status === 401) {
+    localStorage.removeItem('jwt_token');
+    if (typeof window.handleUnauthorized === 'function') {
+      window.handleUnauthorized();
+    }
+  }
+
+  return response;
+}
+
+window.apiFetch = apiFetch;
+window.fetch = apiFetch;
+
 // ═══════════════════════════════════════════════════════════════
 // PRINTER API
 // ═══════════════════════════════════════════════════════════════
