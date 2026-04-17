@@ -271,13 +271,20 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
 
         det60, det35 = _qty_detergentes(order)
 
+        order_number = str(order.id)
+        if order.source.value == "mercadolibre":
+            shipping_id = order.platform_meta.get("shipping_id")
+            if shipping_id is not None and str(shipping_id).strip():
+                order_number = str(shipping_id)
+            order_number = order_number[-4:]
+
         rows.append({
             "Página":           order.source.value,
             "Cliente":          order.shipping.full_name,
             "Dirección":        order.shipping.full_address,
             "Comuna":           ciudad,
             "Factura":          order.platform_meta.get("invoice", ""),
-            "N° Pedido":        order.display_id,
+            "N° Pedido":        order_number,
             "Valor":            order.total,
             "Seguimiento":      order.platform_meta.get("tracking_number", ""),
             "Despacho":         _get_courier(ciudad, order.source.value, rm_comunas),

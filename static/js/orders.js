@@ -264,9 +264,10 @@ function buildOrderCard(order) {
       ? 'bg-yellow-400'
       : 'bg-gray-400';
 
-  const displayId = (isMeli && meta.shipping_id)
-    ? String(meta.shipping_id)
+  const rawDisplayId = isMeli
+    ? (meta.shipping_id || order.display_id || order.id)
     : order.id;
+  const displayId = String(rawDisplayId);
 
   // Desplegable de productos (solo WooCommerce)
   const hasPack = order.items && order.items.some(item => item.is_pack === true);
