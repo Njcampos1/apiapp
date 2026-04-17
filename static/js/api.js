@@ -482,11 +482,29 @@ async function searchOrder() {
   currentOrder = null;
 
   try {
-    const r = await fetch(`/api/orders/${id}?source=${DEFAULT_SOURCE}`);
+    const fromCache = (allOrders || []).find((o) => {
+      const oid = String(o.id || '');
+      const shippingId = String((o.platform_meta && o.platform_meta.shipping_id) || '');
+      return oid === id || shippingId === id;
+    });
+
+    const attempts = fromCache
+      ? [{ source: fromCache.source || DEFAULT_SOURCE, id: String(fromCache.id) }]
+      : [
+          { source: DEFAULT_SOURCE, id },
+          { source: 'mercadolibre', id },
+        ];
+
+    let r = null;
+    for (const attempt of attempts) {
+      r = await fetch(`/api/orders/${attempt.id}?source=${attempt.source}`);
+      if (r.ok) break;
+      if (r.status !== 404) break;
+    }
 
     document.getElementById('scan-loading').classList.add('hidden');
 
-    if (r.status === 404) {
+    if (!r || r.status === 404) {
       document.getElementById('scan-error-msg').textContent = `Pedido #${id} no encontrado`;
       document.getElementById('scan-error').classList.remove('hidden');
       input.select();

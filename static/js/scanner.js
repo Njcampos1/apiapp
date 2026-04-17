@@ -10,6 +10,14 @@
  * Maneja el input del scanner (detecta Enter y doble escaneo)
  * @param {KeyboardEvent} e - Evento del teclado
  */
+function getOrderScanCode(order) {
+  if (!order) return '';
+  if (order.source === 'mercadolibre' && order.platform_meta && order.platform_meta.shipping_id) {
+    return String(order.platform_meta.shipping_id);
+  }
+  return String(order.id || '');
+}
+
 function handleScanInput(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -18,7 +26,7 @@ function handleScanInput(e) {
     if (!id) { input.focus(); return; }
 
     // Doble escaneo: mismo código cuando ya hay un pedido cargado
-    if (currentOrder && id === String(currentOrder.id)) {
+    if (currentOrder && (id === String(currentOrder.id) || id === getOrderScanCode(currentOrder))) {
       input.value = '';
       autoPrintAndComplete();
     } else {
@@ -43,7 +51,8 @@ function renderScanResult(order) {
   const name = [ship.first_name, ship.last_name].filter(Boolean).join(' ') || '—';
   const addr = [ship.address_1, ship.address_2].filter(Boolean).join(', ') || '—';
 
-  document.getElementById('result-id').textContent      = `#${order.id}`;
+  const visibleId = getOrderScanCode(order);
+  document.getElementById('result-id').textContent      = `#${visibleId}`;
   document.getElementById('result-name').textContent    = name;
   document.getElementById('result-phone').textContent   = ship.phone || '—';
   document.getElementById('result-address').textContent = addr;
@@ -117,7 +126,7 @@ function renderScanResult(order) {
     noteSection.classList.add('hidden');
   }
 
-  lastScannedId = String(order.id);
+  lastScannedId = visibleId;
   document.getElementById('zpl-confirm-section').classList.add('hidden');
   document.getElementById('scan-result').classList.remove('hidden');
 }

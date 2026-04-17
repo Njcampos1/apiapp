@@ -969,6 +969,25 @@ async def get_order(
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    # Fallback Mercado Libre: permitir lookup por shipping_id (display_id impreso en picking).
+    if not order and source == OrderSource.MERCADOLIBRE.value:
+        meli: MeliProvider = provider  # type: ignore[assignment]
+        try:
+            pending_orders = await meli.get_pending_orders()
+            matched = next(
+                (
+                    o for o in pending_orders
+                    if o.display_id == str(order_id)
+                ),
+                None,
+            )
+            if matched:
+                order = await meli.get_order(matched.id)
+                if not order:
+                    order = matched
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
     if not order:
         raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
 
