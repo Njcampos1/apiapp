@@ -48,7 +48,7 @@
       </div>
     </div>
 
-    <nav class="flex gap-2">
+    <nav id="app-nav" class="hidden flex gap-2">
       <button onclick="showView('dashboard')" id="tab-dashboard"
         class="tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900">
         📦 Dashboard
@@ -63,14 +63,39 @@
       </button>
     </nav>
 
-    <div class="flex items-center gap-2 text-xs text-coffee-200">
+    <div id="printer-status" class="hidden items-center gap-2 text-xs text-coffee-200">
       <div id="printer-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500" title="Estado impresora"></div>
       <span id="printer-label">Impresora</span>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <div id="auth-user" class="hidden text-right">
+        <p id="auth-user-name" class="text-sm font-semibold leading-tight"></p>
+        <p id="auth-user-email" class="text-xs text-coffee-200 leading-tight"></p>
+      </div>
+      <button id="auth-login-btn"
+        class="hidden bg-coffee-400 text-coffee-900 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-coffee-200 active:scale-95 transition-all shadow">
+        Iniciar sesión
+      </button>
+      <button id="auth-logout-btn"
+        class="hidden bg-coffee-700 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-coffee-600 active:scale-95 transition-all shadow border border-coffee-500">
+        Cerrar sesión
+      </button>
     </div>
   </div>
 </header>
 
 <div id="toast-container" class="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<div id="auth-loading" class="max-w-7xl mx-auto px-4 py-10 text-center">
+  <svg class="spinner w-8 h-8 text-coffee-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+  </svg>
+  <p class="text-coffee-600 font-medium">Validando sesión...</p>
+</div>
+
+<div id="app-shell" class="hidden">
 
 <!-- ── Botón flotante descarga masiva ZPL MeLi ──────────────────── -->
 <div id="bulk-download-zpl-btn" class="hidden fixed bottom-20 right-6 z-40 animate-slide-in">
@@ -564,9 +589,17 @@
   </div>
 </section>
 
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <!-- SCRIPTS MODULARES -->
 <!-- ═══════════════════════════════════════════════════════════════ -->
+<script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
+<script>
+  window.AUTH0_DOMAIN = "{{ auth0_domain | default('', true) }}";
+  window.AUTH0_CLIENT_ID = "{{ auth0_client_id | default('', true) }}";
+  window.AUTH0_AUDIENCE = "{{ auth0_audience | default('', true) }}";
+</script>
 <script src="/static/js/utils.js?v=20260417"></script>
 <script src="/static/js/api.js?v=20260417"></script>
 <script src="/static/js/orders.js?v=20260417"></script>

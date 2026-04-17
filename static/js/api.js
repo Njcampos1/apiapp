@@ -1,11 +1,47 @@
 /**
  * api.js
- * Todas las llamadas HTTP al backend Flask de UpperLogistics
+ * Todas las llamadas HTTP al backend FastAPI de UpperLogistics
  * - Gestión de pedidos (carga, búsqueda, actualización)
  * - Descargas masivas e individuales (ZPL, PDF)
  * - Operaciones de manifest y cierre de día
  * - APIs de impresora y etiquetado
  */
+
+async function getAccessTokenOrLogin() {
+  const auth0Client = window.auth0Client;
+  if (!auth0Client) {
+    throw new Error('AUTH0_CLIENT_NOT_READY');
+  }
+
+  try {
+    return await auth0Client.getTokenSilently({
+      authorizationParams: {
+        audience: window.AUTH0_AUDIENCE,
+      },
+    });
+  } catch (error) {
+    await auth0Client.loginWithRedirect({
+      authorizationParams: {
+        audience: window.AUTH0_AUDIENCE,
+        redirect_uri: `${window.location.origin}${window.location.pathname}`,
+      },
+    });
+    throw error;
+  }
+}
+
+async function apiFetch(url, options = {}, { authRequired = true } = {}) {
+  const requestOptions = { ...options };
+  const headers = new Headers(options.headers || {});
+
+  if (authRequired) {
+    const token = await getAccessTokenOrLogin();
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  requestOptions.headers = headers;
+  return fetch(url, requestOptions);
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PRINTER API
@@ -16,7 +52,7 @@
  */
 async function pingPrinter() {
   try {
-    const r = await fetch('/api/printer/test');
+    const r = await apiFetch('/api/printer/test', {}, { authRequired: false });
     const d = await r.json();
     const dot   = document.getElementById('printer-dot');
     const label = document.getElementById('printer-label');
@@ -53,7 +89,7 @@ async function loadOrders() {
   icon.classList.add('spinner');
 
   try {
-    const r = await fetch('/api/orders');
+    const r = await apiFetch('/api/orders');
     const d = await r.json();
 
     loading.classList.add('hidden');
@@ -95,7 +131,7 @@ async function exportAllOrders() {
   </svg> Generando...`;
 
   try {
-    const r = await fetch('/api/orders/export-all');
+    const r = await apiFetch('/api/orders/export-all');
 
     if (r.status === 404) {
       toast('No hay pedidos nuevos para exportar', 'info');
@@ -143,7 +179,7 @@ async function closeManifestAndDownload() {
   </svg> Cerrando día...`;
 
   try {
-    const r = await fetch('/api/manifests/close', {
+    const r = await apiFetch('/api/manifests/close', {
       method: 'POST'
     });
 
@@ -207,7 +243,7 @@ async function closeManifestAndDownload() {
  */
 async function loadManifestInfo() {
   try {
-    const r = await fetch('/api/manifests/current');
+    const r = await apiFetch('/api/manifests/current');
     if (!r.ok) return;
 
     const data = await r.json();
@@ -243,7 +279,7 @@ async function downloadBulkMeliZpl() {
 
   try {
     const url = `/api/orders/meli/bulk-zpl?ids=${ids.join(',')}`;
-    const r   = await fetch(url);
+    const r   = await apiFetch(url);
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -305,7 +341,7 @@ async function downloadBulkMeliPdf() {
 
   try {
     const url = `/api/orders/meli/bulk-pdf?ids=${ids.join(',')}`;
-    const r   = await fetch(url);
+    const r   = await apiFetch(url);
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -358,7 +394,7 @@ async function downloadBulkMeliPdf() {
 async function downloadSingleZpl(source, id) {
   try {
     const url = `/api/orders/${id}/zpl?source=${source}`;
-    const r = await fetch(url);
+    const r = await apiFetch(url);
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -394,7 +430,7 @@ async function downloadSingleZpl(source, id) {
 async function downloadSinglePdf(source, id) {
   try {
     const url = `/api/orders/${id}/prepare?source=${source}`;
-    const r = await fetch(url, { method: 'POST' });
+    const r = await apiFetch(url, { method: 'POST' });
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -438,7 +474,7 @@ async function prepareOrder(orderId, source) {
   }
 
   try {
-    const r = await fetch(`/api/orders/${orderId}/prepare?source=${source}`, { method: 'POST' });
+    const r = await apiFetch(`/api/orders/${orderId}/prepare?source=${source}`, { method: 'POST' });
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -497,7 +533,7 @@ async function searchOrder() {
 
     let r = null;
     for (const attempt of attempts) {
-      r = await fetch(`/api/orders/${attempt.id}?source=${attempt.source}`);
+      r = await apiFetch(`/api/orders/${attempt.id}?source=${attempt.source}`);
       if (r.ok) break;
       if (r.status !== 404) break;
     }
@@ -540,7 +576,7 @@ async function downloadPickingPdf() {
   if (!currentOrder) return;
   const { id, source } = currentOrder;
   try {
-    const r = await fetch(`/api/orders/${id}/prepare?source=${source || DEFAULT_SOURCE}`, { method: 'POST' });
+    const r = await apiFetch(`/api/orders/${id}/prepare?source=${source || DEFAULT_SOURCE}`, { method: 'POST' });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       toast(`Error: ${err.detail || r.statusText}`, 'error');
@@ -562,7 +598,7 @@ async function downloadZpl() {
   if (!currentOrder) return;
   const { id, source } = currentOrder;
   try {
-    const r = await fetch(`/api/orders/${id}/zpl?source=${source || DEFAULT_SOURCE}`);
+    const r = await apiFetch(`/api/orders/${id}/zpl?source=${source || DEFAULT_SOURCE}`);
     if (!r.ok) {
       toast('Error al generar ZPL', 'error');
       return;
@@ -591,7 +627,7 @@ async function printLabel(autoReset = false) {
   const { id, source } = currentOrder;
 
   try {
-    const r = await fetch(`/api/orders/${id}/label?source=${source || DEFAULT_SOURCE}`, {
+    const r = await apiFetch(`/api/orders/${id}/label?source=${source || DEFAULT_SOURCE}`, {
       method: 'POST'
     });
 
@@ -632,7 +668,7 @@ async function setStatus(newStatus) {
   const labels = { processing: 'Procesando', completed: 'Completado', cancelled: 'Cancelado' };
 
   try {
-    const r = await fetch(
+    const r = await apiFetch(
       `/api/orders/${id}/set-status?source=${source || DEFAULT_SOURCE}&new_status=${newStatus}`,
       { method: 'POST' }
     );

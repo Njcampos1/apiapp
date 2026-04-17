@@ -28,12 +28,12 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import zipfile
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
@@ -63,6 +63,7 @@ from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl_main, build_zpl_note
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
 from services.chilexpress_service import generate_chilexpress_csv
+from security import require_role, verify_token
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -192,6 +193,18 @@ async def printer_test():
     return {"reachable": ok, "message": msg}
 
 
+@app.put("/api/packs/{pack_id}", tags=["packs"])
+async def update_pack_status_example(
+    pack_id: str,
+    claims: dict[str, Any] = Depends(require_role("Admin")),
+):
+    return {
+        "ok": True,
+        "message": f"Pack {pack_id} actualizado (ejemplo RBAC)",
+        "user": claims.get("sub"),
+    }
+
+
 # ── Mercado Libre — OAuth ─────────────────────────────────────────
 @app.get("/api/meli/callback", tags=["meli"])
 async def meli_oauth_callback(
@@ -254,12 +267,15 @@ async def spa(request: Request):
             "request": request,
             "providers": list(_providers.keys()),
             "printer_ip": settings.ZEBRA_IP,
+            "auth0_domain": settings.AUTH0_DOMAIN,
+            "auth0_client_id": settings.AUTH0_CLIENT_ID,
+            "auth0_audience": settings.AUTH0_API_AUDIENCE,
         },
     )
 
 
 # ── Pedidos — Lectura ────────────────────────────────────────────
-@app.get("/api/orders", tags=["orders"])
+@app.get("/api/orders", tags=["orders"], dependencies=[Depends(verify_token)])
 async def list_orders():
     """
     Agrega pedidos 'processing' de todos los proveedores configurados, más
@@ -322,7 +338,7 @@ async def list_orders():
     }
 
 
-@app.get("/api/orders/export-all", tags=["orders"])
+@app.get("/api/orders/export-all", tags=["orders"], dependencies=[Depends(require_role("Admin"))])
 async def export_all_orders():
     """
     Descarga masiva de picking:
@@ -388,7 +404,7 @@ async def export_all_orders():
     )
 
 
-@app.get("/api/orders/export-excel", tags=["orders"])
+@app.get("/api/orders/export-excel", tags=["orders"], dependencies=[Depends(require_role("Admin"))])
 async def export_excel():
     """
     Genera y descarga el reporte Excel de todos los pedidos completados
@@ -420,7 +436,7 @@ async def export_excel():
 
 
 # ── Manifiestos (Lotes de Despacho) ──────────────────────────────
-@app.post("/api/manifests/close", tags=["manifests"])
+@app.post("/api/manifests/close", tags=["manifests"], dependencies=[Depends(require_role("Admin"))])
 async def close_daily_manifest():
     """
     Cierra el manifest abierto actual y genera un ZIP con:
@@ -528,7 +544,7 @@ async def close_daily_manifest():
     )
 
 
-@app.get("/api/manifests/current", tags=["manifests"])
+@app.get("/api/manifests/current", tags=["manifests"], dependencies=[Depends(verify_token)])
 async def get_current_manifest():
     """
     Devuelve información del manifest abierto actual.
@@ -551,7 +567,7 @@ async def get_current_manifest():
 
 
 # ── Mercado Libre — Descarga masiva ZPL nativo ───────────────────
-@app.get("/api/orders/meli/bulk-zpl", tags=["meli"])
+@app.get("/api/orders/meli/bulk-zpl", tags=["meli"], dependencies=[Depends(verify_token)])
 async def bulk_meli_zpl(
     ids: str = Query(
         ...,
@@ -713,7 +729,7 @@ async def bulk_meli_zpl(
 
 
 # ── Mercado Libre — Descarga masiva PDF picking ──────────────────
-@app.get("/api/orders/meli/bulk-pdf", tags=["meli"])
+@app.get("/api/orders/meli/bulk-pdf", tags=["meli"], dependencies=[Depends(verify_token)])
 async def bulk_meli_pdf(
     ids: str = Query(
         ...,
@@ -849,7 +865,7 @@ async def bulk_meli_pdf(
 #         )
 
 
-@app.get("/api/orders/{order_id}/zpl", tags=["orders"])
+@app.get("/api/orders/{order_id}/zpl", tags=["orders"], dependencies=[Depends(verify_token)])
 async def download_zpl(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
@@ -901,7 +917,7 @@ async def download_zpl(
     )
 
 
-@app.post("/api/orders/{order_id}/set-status", tags=["orders"])
+@app.post("/api/orders/{order_id}/set-status", tags=["orders"], dependencies=[Depends(require_role("Admin"))])
 async def set_order_status(
     order_id: str,
     new_status: str = Query(..., description="processing | completed | cancelled"),
@@ -957,7 +973,7 @@ async def set_order_status(
     }
 
 
-@app.get("/api/orders/{order_id}", tags=["orders"])
+@app.get("/api/orders/{order_id}", tags=["orders"], dependencies=[Depends(verify_token)])
 async def get_order(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
@@ -1011,7 +1027,7 @@ async def get_order(
 
 
 # ── Pedidos — Acciones de bodega ─────────────────────────────────
-@app.post("/api/orders/{order_id}/prepare", tags=["orders"])
+@app.post("/api/orders/{order_id}/prepare", tags=["orders"], dependencies=[Depends(verify_token)])
 async def prepare_order(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),
@@ -1065,7 +1081,7 @@ async def prepare_order(
     )
 
 
-@app.post("/api/orders/{order_id}/label", tags=["orders"])
+@app.post("/api/orders/{order_id}/label", tags=["orders"], dependencies=[Depends(verify_token)])
 async def print_label(
     order_id: str,
     source: str = Query(default=OrderSource.WOOCOMMERCE.value),

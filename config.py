@@ -3,6 +3,8 @@ Configuración centralizada vía variables de entorno.
 Usa python-dotenv para cargar el archivo .env en desarrollo local.
 """
 from functools import lru_cache
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +43,22 @@ class Settings(BaseSettings):
     # URI registrada en el panel de MeLi → debe coincidir exactamente.
     # Ejemplo: https://tu-dominio.azure.com/api/meli/callback
     MELI_REDIRECT_URI: str = ""
+
+    # ── Auth0 / JWT ───────────────────────────────────────────────
+    AUTH0_DOMAIN: str = ""
+    AUTH0_CLIENT_ID: str = ""
+    AUTH0_API_AUDIENCE: str = ""
+    AUTH0_ISSUER: str = ""
+    AUTH0_ALGORITHMS: list[str] = ["RS256"]
+
+    @field_validator("AUTH0_ALGORITHMS", mode="before")
+    @classmethod
+    def _parse_auth0_algorithms(cls, value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [algorithm.strip() for algorithm in value.split(",") if algorithm.strip()]
+        if isinstance(value, list):
+            return [str(algorithm).strip() for algorithm in value if str(algorithm).strip()]
+        return ["RS256"]
 
 
 @lru_cache
