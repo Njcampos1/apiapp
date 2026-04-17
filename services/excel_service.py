@@ -4,7 +4,8 @@ Servicio de exportación de pedidos a formato Excel (.xlsx).
 Reglas de negocio:
   - Courier: 'Rocket' si la comuna está en data/rm.json, 'Chilexpress' en caso contrario.
   - Chocolate: items cuyo SKU pertenece a CHOCOLATE_SKUS.
-  - Cafe: todos los demás SKUs.
+    - Cafe: SKUs de café; para Mercado Libre excluye SKUs de 'otros_productos'
+        (ej. detergentes/cobertores) y fallback por nombre.
     - Cobertor: items cuyo nombre contiene la palabra (case-insensitive).
     - Detergente 60 / 35: cálculo por SKU específico, con fallback por nombre.
 """
@@ -69,11 +70,13 @@ def _load_rm_comunas() -> frozenset[str]:
     return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
-def _load_sku_data() -> tuple[dict[str, int], set[str]]:
+def _load_sku_data() -> tuple[dict[str, int], set[str], set[str]]:
     """
     Devuelve:
     - Diccionario de multiplicadores por SKU: {sku: cantidad_total_capsulas}
     - Set de SKUs unitarios (sku_unitario) que son componentes de packs
+    - Set de SKUs de Mercado Libre que NO deben contar como café
+      (otros_productos: limpieza/hogar)
     """
     with open(_SKU_JSON_PATH, encoding="utf-8") as f:
         data = json.load(f)
@@ -81,6 +84,7 @@ def _load_sku_data() -> tuple[dict[str, int], set[str]]:
     catalogo = data.get("catalogo", {})
     multipliers = {}
     unit_skus = set()
+    non_cafe_meli_skus = set()
 
     # Procesar packs prearmados
     for pack in catalogo.get("packs_prearmados", []):
@@ -116,7 +120,21 @@ def _load_sku_data() -> tuple[dict[str, int], set[str]]:
             if sku_alias and cantidad:
                 multipliers[sku_alias] = cantidad
 
-    return multipliers, unit_skus
+    # SKUs de otros productos de Mercado Libre (detergentes, cobertores, etc.)
+    for item in catalogo.get("otros_productos", []):
+        canales = set(item.get("canales_venta", []))
+        if "mercadolibre" not in canales:
+            continue
+
+        sku_principal = item.get("sku_principal")
+        if sku_principal:
+            non_cafe_meli_skus.add(str(sku_principal))
+
+        for sku_alias in item.get("skus_alias", []):
+            if sku_alias:
+                non_cafe_meli_skus.add(str(sku_alias))
+
+    return multipliers, unit_skus, non_cafe_meli_skus
 
 
 def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
@@ -166,7 +184,8 @@ def _qty_chocolate(
 def _qty_cafe(
     order: NormalizedOrder,
     sku_multipliers: dict[str, int],
-    unit_skus: set[str]
+    unit_skus: set[str],
+    non_cafe_meli_skus: set[str],
 ) -> int:
     """
     Calcula la cantidad total de unidades de café.
@@ -180,6 +199,17 @@ def _qty_cafe(
     for item in order.items:
         if item.sku in CHOCOLATE_SKUS:
             continue
+
+        # Mercado Libre: excluir SKUs no-café (ej. limpieza/hogar).
+        # Fallback por nombre para casos donde el SKU venga alterado.
+        if order.source.value == "mercadolibre":
+            normalized_name = _normalize_text(item.name or "")
+            if (
+                item.sku in non_cafe_meli_skus
+                or "detergente" in normalized_name
+                or "cobertor" in normalized_name
+            ):
+                continue
 
         # Si es un pack, usar multiplicador
         if item.sku in sku_multipliers:
@@ -249,7 +279,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     Los pedidos se ordenan por fecha de impresión de etiqueta (label_printed_at).
     """
     rm_comunas = _load_rm_comunas()
-    sku_multipliers, unit_skus = _load_sku_data()
+    sku_multipliers, unit_skus, non_cafe_meli_skus = _load_sku_data()
     rows = []
 
     for order in orders:
@@ -292,7 +322,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Detergente 60":    det60,
             "Detergente 35":    det35,
             "Chocolate":        _qty_chocolate(order, sku_multipliers, unit_skus),
-            "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus),
+            "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus, non_cafe_meli_skus),
             "Fecha_Etiqueta":   fecha_etiqueta_str,
         })
 
