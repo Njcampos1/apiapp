@@ -964,14 +964,27 @@ async def get_order(
 ):
     """Retorna el detalle normalizado de un pedido por ID."""
     provider = get_provider(source)
+    meli: Optional[MeliProvider] = None
     try:
         order = await provider.get_order(order_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    # Fallback Mercado Libre: permitir lookup por shipping_id (display_id impreso en picking).
-    if not order and source == OrderSource.MERCADOLIBRE.value:
-        meli: MeliProvider = provider  # type: ignore[assignment]
+    # Fallback Mercado Libre para scanner:
+    # 1) lookup directo por order_id en MeLi
+    # 2) lookup por shipping_id/display_id en pendientes MeLi
+    if not order:
+        meli_provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+        if isinstance(meli_provider, MeliProvider):
+            meli = meli_provider
+
+    if not order and meli:
+        try:
+            order = await meli.get_order(order_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    if not order and meli:
         try:
             pending_orders = await meli.get_pending_orders()
             matched = next(
