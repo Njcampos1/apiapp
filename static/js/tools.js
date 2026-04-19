@@ -7,29 +7,186 @@
  */
 
 // Estado del calculador DUN-14
-let activeDunTab = 'single'; // 'single' | 'batch'
+let activeDunTab = 'single'; // 'single' | 'batch' | 'pack-editor'
 let batchResults = []; // Resultados del cálculo por lotes
+let skusLoaded = false;
+let skusSnapshot = '';
+
+function hasUnsavedSkusChanges() {
+  const textarea = document.getElementById('pack-editor-textarea');
+  if (!textarea) return false;
+  return textarea.value !== skusSnapshot;
+}
+
+function shouldWarnOnBeforeUnload() {
+  return activeDunTab === 'pack-editor' && hasUnsavedSkusChanges();
+}
+
+function updatePackEditorStatus(message, type = 'info') {
+  const statusEl = document.getElementById('pack-editor-status');
+  if (!statusEl) return;
+
+  const colorByType = {
+    info: 'text-coffee-500',
+    success: 'text-green-600',
+    error: 'text-red-600',
+  };
+
+  statusEl.className = `text-sm ${colorByType[type] || colorByType.info}`;
+  statusEl.textContent = message;
+}
+
+function updateToolsAdminVisibility() {
+  const packEditorTab = document.getElementById('pack-tab-editor');
+  if (!packEditorTab) return;
+
+  const isAdmin = localStorage.getItem('is_admin') === 'true';
+  packEditorTab.classList.toggle('hidden', !isAdmin);
+
+  if (!isAdmin && activeDunTab === 'pack-editor') {
+    setDunTab('single');
+  }
+}
 
 /**
  * Cambia la pestaña activa del calculador DUN-14
  * @param {string} tab - 'single' o 'batch'
  */
 function setDunTab(tab) {
+  if (tab === 'pack-editor' && localStorage.getItem('is_admin') !== 'true') {
+    toast('Solo administradores pueden editar packs', 'warn');
+    return;
+  }
+
+  if (activeDunTab === 'pack-editor' && tab !== 'pack-editor' && hasUnsavedSkusChanges()) {
+    const shouldLeave = window.confirm('Tienes cambios sin guardar en Gestión de Packs. ¿Deseas salir sin guardar?');
+    if (!shouldLeave) {
+      return;
+    }
+  }
+
   activeDunTab = tab;
 
   // Actualizar estilos de tabs
   const singleTab = document.getElementById('dun-tab-single');
   const batchTab = document.getElementById('dun-tab-batch');
+  const packEditorTab = document.getElementById('pack-tab-editor');
 
   const activeClass = 'px-4 py-2 font-semibold text-sm transition-all border-b-2 border-coffee-400 text-coffee-900';
   const inactiveClass = 'px-4 py-2 font-semibold text-sm transition-all border-b-2 border-transparent text-coffee-400 hover:text-coffee-600';
 
   singleTab.className = tab === 'single' ? activeClass : inactiveClass;
   batchTab.className = tab === 'batch' ? activeClass : inactiveClass;
+  if (packEditorTab && !packEditorTab.classList.contains('hidden')) {
+    packEditorTab.className = tab === 'pack-editor' ? activeClass : inactiveClass;
+  }
 
   // Mostrar/ocultar vistas
   document.getElementById('dun-single-view').classList.toggle('hidden', tab !== 'single');
   document.getElementById('dun-batch-view').classList.toggle('hidden', tab !== 'batch');
+  document.getElementById('tools-pack-editor-view').classList.toggle('hidden', tab !== 'pack-editor');
+
+  if (tab === 'pack-editor') {
+    loadSkus();
+  }
+}
+
+async function loadSkus(forceReload = false) {
+  const textarea = document.getElementById('pack-editor-textarea');
+  if (!textarea) return;
+
+  if (skusLoaded && !forceReload) return;
+
+  updatePackEditorStatus('Cargando SKUs...', 'info');
+
+  try {
+    const response = await fetch('/api/skus');
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.detail || response.statusText || 'No se pudo cargar SKUs');
+    }
+
+    textarea.value = JSON.stringify(payload, null, 2);
+    skusSnapshot = textarea.value;
+    skusLoaded = true;
+    updatePackEditorStatus('SKUs cargados correctamente', 'success');
+  } catch (error) {
+    updatePackEditorStatus('Error al cargar SKUs', 'error');
+    toast(`Error al cargar SKUs: ${error.message}`, 'error');
+  }
+}
+
+async function saveSkus() {
+  const textarea = document.getElementById('pack-editor-textarea');
+  const saveBtn = document.getElementById('pack-editor-save-btn');
+  if (!textarea || !saveBtn) return;
+
+  let parsedJson;
+  try {
+    parsedJson = JSON.parse(textarea.value);
+  } catch (error) {
+    updatePackEditorStatus('JSON inválido. Revisa el formato.', 'error');
+    toast(`JSON inválido: ${error.message}`, 'error');
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Guardando...';
+  updatePackEditorStatus('Guardando cambios...', 'info');
+
+  try {
+    const response = await fetch('/api/skus', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(parsedJson),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.detail || response.statusText || 'No se pudo guardar SKUs');
+    }
+
+    textarea.value = JSON.stringify(parsedJson, null, 2);
+    skusSnapshot = textarea.value;
+    skusLoaded = true;
+    updatePackEditorStatus('Cambios guardados correctamente', 'success');
+    toast(payload.message || 'SKUs actualizados correctamente', 'success');
+  } catch (error) {
+    updatePackEditorStatus('Error al guardar cambios', 'error');
+    toast(`Error al guardar SKUs: ${error.message}`, 'error');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Guardar Cambios';
+  }
+}
+
+async function reloadSkus() {
+  const reloadBtn = document.getElementById('pack-editor-reload-btn');
+
+  if (hasUnsavedSkusChanges()) {
+    const shouldReload = window.confirm('Hay cambios sin guardar. ¿Deseas recargar y descartar los cambios actuales?');
+    if (!shouldReload) {
+      return;
+    }
+  }
+
+  if (reloadBtn) {
+    reloadBtn.disabled = true;
+    reloadBtn.textContent = 'Recargando...';
+  }
+
+  try {
+    await loadSkus(true);
+    toast('JSON recargado desde el servidor', 'success');
+  } finally {
+    if (reloadBtn) {
+      reloadBtn.disabled = false;
+      reloadBtn.textContent = 'Recargar JSON';
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -271,3 +428,34 @@ function downloadDun14Csv() {
 
   toast('CSV descargado correctamente', 'success');
 }
+
+window.setDunTab = setDunTab;
+window.loadSkus = loadSkus;
+window.saveSkus = saveSkus;
+window.reloadSkus = reloadSkus;
+window.updateToolsAdminVisibility = updateToolsAdminVisibility;
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateToolsAdminVisibility();
+
+  const textarea = document.getElementById('pack-editor-textarea');
+  if (textarea) {
+    textarea.addEventListener('input', () => {
+      if (!skusLoaded) return;
+      if (hasUnsavedSkusChanges()) {
+        updatePackEditorStatus('Tienes cambios sin guardar', 'info');
+      } else {
+        updatePackEditorStatus('Sin cambios pendientes', 'success');
+      }
+    });
+  }
+});
+
+window.addEventListener('beforeunload', (event) => {
+  if (!shouldWarnOnBeforeUnload()) {
+    return;
+  }
+
+  event.preventDefault();
+  event.returnValue = '';
+});

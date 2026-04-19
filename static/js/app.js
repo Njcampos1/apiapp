@@ -24,10 +24,14 @@ let appBootstrapped = false;
 
 function updateAdminNavigationVisibility() {
   const navUsersBtn = document.getElementById('nav-users-btn');
-  if (!navUsersBtn) return;
-
   const isAdmin = localStorage.getItem('is_admin') === 'true';
-  navUsersBtn.classList.toggle('hidden', !isAdmin);
+  if (navUsersBtn) {
+    navUsersBtn.classList.toggle('hidden', !isAdmin);
+  }
+
+  if (typeof window.updateToolsAdminVisibility === 'function') {
+    window.updateToolsAdminVisibility();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

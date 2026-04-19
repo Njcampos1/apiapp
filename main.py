@@ -24,17 +24,20 @@ Rutas:
 """
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import zipfile
 
 import httpx
 import jwt
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -71,6 +74,7 @@ from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl_main, build_zpl_note
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
+from services import pack_service
 from services.chilexpress_service import generate_chilexpress_csv
 
 logging.basicConfig(
@@ -88,6 +92,8 @@ _providers: ProviderRegistry = {}
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 JWT_ALGORITHM = "HS256"
+SKUS_JSON_PATH = Path("data") / "skus.json"
+SKUS_AUDIT_PATH = Path("data") / "skus_audit.jsonl"
 
 
 class LoginRequest(BaseModel):
@@ -103,6 +109,265 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+
+
+def _require_non_empty_string(value: Any, field_path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{field_path}' debe ser un string no vacío",
+        )
+    return value.strip()
+
+
+def _require_int(value: Any, field_path: str, min_value: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{field_path}' debe ser un número entero",
+        )
+
+    if value < min_value:
+        comparator = ">" if min_value > 0 else ">="
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{field_path}' debe ser {comparator} {min_value if min_value > 0 else 0}",
+        )
+    return value
+
+
+def _require_string_list(value: Any, field_path: str) -> list[str]:
+    if not isinstance(value, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{field_path}' debe ser una lista",
+        )
+
+    validated: list[str] = []
+    for idx, item in enumerate(value):
+        validated.append(_require_non_empty_string(item, f"{field_path}[{idx}]"))
+    return validated
+
+
+def validate_skus_schema(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El JSON debe ser un objeto en la raíz",
+        )
+
+    catalogo = payload.get("catalogo")
+    if not isinstance(catalogo, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El JSON debe contener 'catalogo' como objeto",
+        )
+
+    required_categories = ("packs_prearmados", "mix_personalizables", "otros_productos")
+    for category in required_categories:
+        if category not in catalogo:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Falta la categoría obligatoria 'catalogo.{category}'",
+            )
+
+        if not isinstance(catalogo[category], list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'catalogo.{category}' debe ser una lista",
+            )
+
+    def validate_common_product_fields(item: dict[str, Any], path: str) -> None:
+        _require_non_empty_string(item.get("sku_principal"), f"{path}.sku_principal")
+        _require_non_empty_string(item.get("nombre"), f"{path}.nombre")
+        _require_string_list(item.get("skus_alias"), f"{path}.skus_alias")
+        channels = _require_string_list(item.get("canales_venta"), f"{path}.canales_venta")
+        if not channels:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.canales_venta' no puede estar vacío",
+            )
+
+    for idx, pack in enumerate(catalogo["packs_prearmados"]):
+        path = f"catalogo.packs_prearmados[{idx}]"
+        if not isinstance(pack, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}' debe ser un objeto",
+            )
+
+        validate_common_product_fields(pack, path)
+        _require_int(pack.get("cantidad_total_capsulas"), f"{path}.cantidad_total_capsulas", min_value=1)
+
+        if not isinstance(pack.get("es_personalizable"), bool):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.es_personalizable' debe ser booleano",
+            )
+
+        contenido = pack.get("contenido")
+        if not isinstance(contenido, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.contenido' debe ser una lista",
+            )
+
+        if not contenido:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.contenido' no puede estar vacío",
+            )
+
+        for content_idx, item in enumerate(contenido):
+            content_path = f"{path}.contenido[{content_idx}]"
+            if not isinstance(item, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"'{content_path}' debe ser un objeto",
+                )
+
+            _require_non_empty_string(item.get("sku_unitario"), f"{content_path}.sku_unitario")
+            _require_non_empty_string(item.get("sabor"), f"{content_path}.sabor")
+            _require_int(item.get("cajas_de_10"), f"{content_path}.cajas_de_10", min_value=1)
+
+    for idx, mix in enumerate(catalogo["mix_personalizables"]):
+        path = f"catalogo.mix_personalizables[{idx}]"
+        if not isinstance(mix, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}' debe ser un objeto",
+            )
+
+        validate_common_product_fields(mix, path)
+        _require_int(mix.get("cantidad_total_capsulas"), f"{path}.cantidad_total_capsulas", min_value=1)
+        _require_int(mix.get("cajas_a_elegir"), f"{path}.cajas_a_elegir", min_value=1)
+        _require_non_empty_string(mix.get("restricciones_sabores"), f"{path}.restricciones_sabores")
+
+        if not isinstance(mix.get("es_personalizable"), bool):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.es_personalizable' debe ser booleano",
+            )
+
+        contenido = mix.get("contenido")
+        if not isinstance(contenido, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}.contenido' debe ser una lista",
+            )
+
+        for content_idx, item in enumerate(contenido):
+            content_path = f"{path}.contenido[{content_idx}]"
+            if not isinstance(item, dict):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"'{content_path}' debe ser un objeto",
+                )
+
+            _require_non_empty_string(item.get("sku_unitario"), f"{content_path}.sku_unitario")
+            _require_non_empty_string(item.get("sabor"), f"{content_path}.sabor")
+            _require_int(item.get("cajas_de_10"), f"{content_path}.cajas_de_10", min_value=1)
+
+    for idx, item in enumerate(catalogo["otros_productos"]):
+        path = f"catalogo.otros_productos[{idx}]"
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{path}' debe ser un objeto",
+            )
+
+        validate_common_product_fields(item, path)
+        _require_non_empty_string(item.get("categoria"), f"{path}.categoria")
+
+
+def _build_sku_dict(catalogo: dict[str, Any], category: str) -> dict[str, dict[str, Any]]:
+    items = catalogo.get(category, [])
+    result: dict[str, dict[str, Any]] = {}
+    if not isinstance(items, list):
+        return result
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        sku = item.get("sku_principal")
+        if isinstance(sku, str) and sku:
+            result[sku] = item
+    return result
+
+
+def summarize_sku_changes(old_payload: dict[str, Any], new_payload: dict[str, Any]) -> dict[str, Any]:
+    categories = ("packs_prearmados", "mix_personalizables", "otros_productos")
+    old_catalog = old_payload.get("catalogo", {}) if isinstance(old_payload, dict) else {}
+    new_catalog = new_payload.get("catalogo", {}) if isinstance(new_payload, dict) else {}
+
+    by_category: dict[str, dict[str, Any]] = {}
+    totals = {
+        "added": 0,
+        "removed": 0,
+        "modified": 0,
+    }
+
+    for category in categories:
+        old_map = _build_sku_dict(old_catalog, category)
+        new_map = _build_sku_dict(new_catalog, category)
+
+        old_skus = set(old_map.keys())
+        new_skus = set(new_map.keys())
+
+        added = sorted(new_skus - old_skus)
+        removed = sorted(old_skus - new_skus)
+        common = old_skus & new_skus
+
+        modified = sorted(
+            sku
+            for sku in common
+            if json.dumps(old_map[sku], ensure_ascii=False, sort_keys=True)
+            != json.dumps(new_map[sku], ensure_ascii=False, sort_keys=True)
+        )
+
+        totals["added"] += len(added)
+        totals["removed"] += len(removed)
+        totals["modified"] += len(modified)
+
+        by_category[category] = {
+            "added_count": len(added),
+            "removed_count": len(removed),
+            "modified_count": len(modified),
+            "added_skus": added[:20],
+            "removed_skus": removed[:20],
+            "modified_skus": modified[:20],
+        }
+
+    return {
+        "totals": totals,
+        "by_category": by_category,
+    }
+
+
+def create_skus_backup() -> Path | None:
+    if not SKUS_JSON_PATH.exists():
+        return None
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = SKUS_JSON_PATH.with_name(f"skus.backup.{timestamp}.json")
+    shutil.copy2(SKUS_JSON_PATH, backup_path)
+    return backup_path
+
+
+def append_skus_audit_entry(
+    admin_username: str,
+    summary: dict[str, Any],
+    backup_path: Path | None,
+) -> None:
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "admin": admin_username,
+        "backup_file": backup_path.name if backup_path else None,
+        "summary": summary,
+    }
+
+    with open(SKUS_AUDIT_PATH, "a", encoding="utf-8") as file:
+        file.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def hash_password(password: str) -> str:
@@ -327,6 +592,88 @@ async def list_users_endpoint(
 ):
     users = await get_all_users()
     return [UserResponse(id=u["id"], username=u["username"]) for u in users]
+
+
+@app.get("/api/skus", tags=["packs"])
+async def get_skus(_current_user: dict[str, Any] = Depends(get_current_user)):
+    try:
+        with open(SKUS_JSON_PATH, encoding="utf-8") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontró el archivo de SKUs",
+        )
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="El archivo de SKUs contiene JSON inválido",
+        )
+
+
+@app.put("/api/skus", tags=["packs"])
+async def update_skus(
+    payload: Any = Body(...),
+    _admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    validate_skus_schema(payload)
+
+    old_payload: dict[str, Any] = {}
+    if SKUS_JSON_PATH.exists():
+        try:
+            with open(SKUS_JSON_PATH, encoding="utf-8") as file:
+                loaded = json.load(file)
+                if isinstance(loaded, dict):
+                    old_payload = loaded
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="El archivo actual de SKUs contiene JSON inválido; no se puede versionar",
+            )
+
+    change_summary = summarize_sku_changes(old_payload, payload)
+
+    try:
+        backup_path = create_skus_backup()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo generar respaldo de SKUs: {exc}",
+        )
+
+    try:
+        with open(SKUS_JSON_PATH, "w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo guardar el archivo de SKUs: {exc}",
+        )
+
+    pack_service._load_full_catalog.cache_clear()
+
+    admin_username = str(_admin_user.get("username", "admin"))
+    append_skus_audit_entry(
+        admin_username=admin_username,
+        summary=change_summary,
+        backup_path=backup_path,
+    )
+
+    summary_text = (
+        f"admin={admin_username}; "
+        f"added={change_summary['totals']['added']}; "
+        f"removed={change_summary['totals']['removed']}; "
+        f"modified={change_summary['totals']['modified']}; "
+        f"backup={(backup_path.name if backup_path else 'none')}"
+    )
+    await log_event("skus", "system", "skus_updated", summary_text)
+
+    return {
+        "message": "SKUs actualizados correctamente",
+        "backup_file": backup_path.name if backup_path else None,
+        "changed": change_summary,
+    }
 
 
 @app.get("/api/printer/test", tags=["infra"])
