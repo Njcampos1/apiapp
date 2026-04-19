@@ -5,7 +5,7 @@
  * - Módulo Gestión de Packs (selección guiada)
  */
 
-const PACK_EDITABLE_CATEGORIES = ['packs_prearmados', 'mix_personalizables'];
+const PACK_EDITABLE_CATEGORIES = ['packs_prearmados'];
 
 let activeToolModule = 'dun14';
 let activeDunTab = 'single';
