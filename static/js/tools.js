@@ -11,6 +11,7 @@ let activeDunTab = 'single'; // 'single' | 'batch' | 'pack-editor'
 let batchResults = []; // Resultados del cálculo por lotes
 let skusLoaded = false;
 let skusSnapshot = '';
+let skusAuditLoaded = false;
 
 function hasUnsavedSkusChanges() {
   const textarea = document.getElementById('pack-editor-textarea');
@@ -34,6 +35,68 @@ function updatePackEditorStatus(message, type = 'info') {
 
   statusEl.className = `text-sm ${colorByType[type] || colorByType.info}`;
   statusEl.textContent = message;
+}
+
+function updatePackAuditStatus(message, type = 'info') {
+  const statusEl = document.getElementById('pack-audit-status');
+  if (!statusEl) return;
+
+  const colorByType = {
+    info: 'text-coffee-500',
+    success: 'text-green-600',
+    error: 'text-red-600',
+  };
+
+  statusEl.className = `text-xs ${colorByType[type] || colorByType.info}`;
+  statusEl.textContent = message;
+}
+
+function formatAuditDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('es-CL', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  });
+}
+
+function renderSkusAudit(entries) {
+  const listEl = document.getElementById('pack-audit-list');
+  const emptyEl = document.getElementById('pack-audit-empty');
+  if (!listEl || !emptyEl) return;
+
+  listEl.innerHTML = '';
+
+  if (!entries || entries.length === 0) {
+    emptyEl.classList.remove('hidden');
+    return;
+  }
+
+  emptyEl.classList.add('hidden');
+
+  entries.forEach((entry) => {
+    const totals = entry?.summary?.totals || {};
+    const admin = entry?.admin || 'admin';
+    const backup = entry?.backup_file || '—';
+    const html = `
+      <div class="bg-white border border-coffee-200 rounded-lg p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-sm font-semibold text-coffee-800">${admin}</p>
+            <p class="text-xs text-coffee-500">${formatAuditDate(entry?.timestamp)}</p>
+          </div>
+          <div class="text-right text-xs">
+            <p class="text-green-700 font-semibold">+${totals.added || 0}</p>
+            <p class="text-red-700 font-semibold">-${totals.removed || 0}</p>
+            <p class="text-blue-700 font-semibold">~${totals.modified || 0}</p>
+          </div>
+        </div>
+        <p class="text-xs text-coffee-600 mt-2"><span class="font-semibold">Backup:</span> ${backup}</p>
+      </div>
+    `;
+    listEl.insertAdjacentHTML('beforeend', html);
+  });
 }
 
 function updateToolsAdminVisibility() {
@@ -88,6 +151,7 @@ function setDunTab(tab) {
 
   if (tab === 'pack-editor') {
     loadSkus();
+    loadSkusAudit();
   }
 }
 
@@ -152,14 +216,50 @@ async function saveSkus() {
     textarea.value = JSON.stringify(parsedJson, null, 2);
     skusSnapshot = textarea.value;
     skusLoaded = true;
-    updatePackEditorStatus('Cambios guardados correctamente', 'success');
+    const backupFile = payload.backup_file ? ` (backup: ${payload.backup_file})` : '';
+    updatePackEditorStatus(`Cambios guardados correctamente${backupFile}`, 'success');
     toast(payload.message || 'SKUs actualizados correctamente', 'success');
+    await loadSkusAudit(true);
   } catch (error) {
     updatePackEditorStatus('Error al guardar cambios', 'error');
     toast(`Error al guardar SKUs: ${error.message}`, 'error');
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Guardar Cambios';
+  }
+}
+
+async function loadSkusAudit(forceReload = false) {
+  if (skusAuditLoaded && !forceReload) return;
+
+  const refreshBtn = document.getElementById('pack-audit-refresh-btn');
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Actualizando...';
+  }
+
+  updatePackAuditStatus('Cargando historial...', 'info');
+
+  try {
+    const response = await fetch('/api/skus/audit?limit=30');
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(payload.detail || response.statusText || 'No se pudo cargar el historial');
+    }
+
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    renderSkusAudit(entries);
+    skusAuditLoaded = true;
+    updatePackAuditStatus(`Mostrando ${entries.length} registro(s) recientes`, 'success');
+  } catch (error) {
+    updatePackAuditStatus('Error al cargar historial', 'error');
+    toast(`Error al cargar historial: ${error.message}`, 'error');
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = 'Actualizar Historial';
+    }
   }
 }
 
@@ -433,6 +533,7 @@ window.setDunTab = setDunTab;
 window.loadSkus = loadSkus;
 window.saveSkus = saveSkus;
 window.reloadSkus = reloadSkus;
+window.loadSkusAudit = loadSkusAudit;
 window.updateToolsAdminVisibility = updateToolsAdminVisibility;
 
 document.addEventListener('DOMContentLoaded', () => {

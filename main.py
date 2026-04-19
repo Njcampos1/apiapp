@@ -611,6 +611,41 @@ async def get_skus(_current_user: dict[str, Any] = Depends(get_current_user)):
         )
 
 
+@app.get("/api/skus/audit", tags=["packs"])
+async def get_skus_audit(
+    limit: int = Query(default=30, ge=1, le=200),
+    _admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    if not SKUS_AUDIT_PATH.exists():
+        return {"entries": [], "total": 0}
+
+    entries: list[dict[str, Any]] = []
+    try:
+        with open(SKUS_AUDIT_PATH, encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("Línea inválida en auditoría de SKUs: %s", line)
+                    continue
+                if isinstance(parsed, dict):
+                    entries.append(parsed)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo leer la auditoría de SKUs: {exc}",
+        )
+
+    entries.reverse()
+    return {
+        "entries": entries[:limit],
+        "total": len(entries),
+    }
+
+
 @app.put("/api/skus", tags=["packs"])
 async def update_skus(
     payload: Any = Body(...),
