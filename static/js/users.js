@@ -53,7 +53,7 @@ function renderUsersTable(users) {
   if (!Array.isArray(users) || users.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="3" class="px-4 py-4 text-center text-coffee-500">No hay usuarios registrados</td>
+        <td colspan="4" class="px-4 py-4 text-center text-coffee-500">No hay usuarios registrados</td>
       </tr>
     `;
     return;
@@ -74,6 +74,18 @@ function renderUsersTable(users) {
             <button onclick="updateUserRole(${user.id})"
               class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-coffee-100 text-coffee-800 hover:bg-coffee-200 transition-all">
               Guardar
+            </button>
+          </div>
+        </td>
+        <td class="px-4 py-3">
+          <div class="flex items-center gap-2">
+            <button onclick="renameUser(${user.id}, '${user.username.replace(/'/g, "\\'")}')"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-100 text-blue-800 hover:bg-blue-200 transition-all">
+              Cambiar nombre
+            </button>
+            <button onclick="removeUser(${user.id}, '${user.username.replace(/'/g, "\\'")}')"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-100 text-red-800 hover:bg-red-200 transition-all">
+              Eliminar
             </button>
           </div>
         </td>
@@ -119,6 +131,64 @@ async function updateUserRole(userId) {
   }
 }
 
+async function renameUser(userId, currentUsername) {
+  const newUsername = window.prompt('Nuevo nombre de usuario:', currentUsername);
+  if (newUsername === null) return;
+
+  const normalized = newUsername.trim();
+  if (!normalized) {
+    notifyUsers('El nombre de usuario no puede estar vacío', 'warn');
+    return;
+  }
+
+  if (normalized === currentUsername) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username: normalized }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notifyUsers(extractApiErrorMessage(payload, 'No se pudo actualizar el usuario.'), 'error');
+      return;
+    }
+
+    notifyUsers('Usuario actualizado correctamente', 'success');
+    await loadUsers();
+  } catch {
+    notifyUsers('Error de conexión al actualizar usuario', 'error');
+  }
+}
+
+async function removeUser(userId, username) {
+  const confirmed = window.confirm(`¿Seguro que deseas eliminar al usuario ${username}? Esta acción no se puede deshacer.`);
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/users/${userId}`, {
+      method: 'DELETE',
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notifyUsers(extractApiErrorMessage(payload, 'No se pudo eliminar el usuario.'), 'error');
+      return;
+    }
+
+    notifyUsers(payload.message || 'Usuario eliminado correctamente', 'success');
+    await loadUsers();
+  } catch {
+    notifyUsers('Error de conexión al eliminar usuario', 'error');
+  }
+}
+
 async function loadUsers() {
   const isAdmin = localStorage.getItem('is_admin') === 'true';
   if (!isAdmin) return;
@@ -127,7 +197,7 @@ async function loadUsers() {
   if (tbody) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="3" class="px-4 py-4 text-center text-coffee-500">Cargando usuarios...</td>
+        <td colspan="4" class="px-4 py-4 text-center text-coffee-500">Cargando usuarios...</td>
       </tr>
     `;
   }
@@ -211,6 +281,8 @@ async function handleCreateUserSubmit(event) {
 
 window.loadUsers = loadUsers;
 window.updateUserRole = updateUserRole;
+window.renameUser = renameUser;
+window.removeUser = removeUser;
 
 window.addEventListener('DOMContentLoaded', () => {
   const createForm = document.getElementById('users-create-form');

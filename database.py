@@ -389,6 +389,26 @@ async def update_user_role(user_id: int, role: str) -> bool:
         return cursor.rowcount > 0
 
 
+async def update_username(user_id: int, username: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE users SET username = ? WHERE id = ?",
+            (username, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_user(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM users WHERE id = ?",
+            (user_id,),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 # ── Tokens de Mercado Libre ──────────────────────────────────────────────────
 
 class MeliTokenRow(TypedDict):

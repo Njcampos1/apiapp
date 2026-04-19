@@ -51,6 +51,7 @@ from pydantic import BaseModel, Field
 from config import settings
 from database import (
     create_user,
+    delete_user,
     ensure_default_admin_user,
     get_all_users,
     get_user_by_id,
@@ -66,6 +67,7 @@ from database import (
     close_manifest,
     get_manifest_orders,
     get_open_manifest_info,
+    update_username,
     update_user_role,
 )
 from models.order import NormalizedOrder, OrderStatus, OrderSource
@@ -116,6 +118,10 @@ class UserResponse(BaseModel):
 
 class UserRoleUpdateRequest(BaseModel):
     role: str = Field(pattern="^(admin|user)$")
+
+
+class UserUpdateRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=120)
 
 
 def _require_non_empty_string(value: Any, field_path: str) -> str:
@@ -641,6 +647,81 @@ async def update_user_role_endpoint(
         username=refreshed_user["username"],
         role=refreshed_user["role"],
     )
+
+
+@app.put("/api/users/{user_id}", tags=["users"], response_model=UserResponse)
+async def update_user_endpoint(
+    user_id: int,
+    payload: UserUpdateRequest,
+    admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    target_user = await get_user_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    if target_user["id"] == admin_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes modificar tu propio usuario desde esta acción",
+        )
+
+    existing = await get_user_by_username(payload.username)
+    if existing is not None and existing["id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El nombre de usuario ya existe",
+        )
+
+    updated = await update_username(user_id, payload.username)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo actualizar el usuario",
+        )
+
+    refreshed_user = await get_user_by_id(user_id)
+    if refreshed_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    return UserResponse(
+        id=refreshed_user["id"],
+        username=refreshed_user["username"],
+        role=refreshed_user["role"],
+    )
+
+
+@app.delete("/api/users/{user_id}", tags=["users"])
+async def delete_user_endpoint(
+    user_id: int,
+    admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    target_user = await get_user_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    if target_user["id"] == admin_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes eliminar tu propio usuario",
+        )
+
+    deleted = await delete_user(user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo eliminar el usuario",
+        )
+
+    return {"message": "Usuario eliminado correctamente"}
 
 
 @app.get("/api/skus", tags=["packs"])
