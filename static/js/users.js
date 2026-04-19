@@ -19,6 +19,25 @@ function clearUsersFormError() {
   errorEl.classList.add('hidden');
 }
 
+function extractApiErrorMessage(payload, fallbackMessage) {
+  if (!payload) return fallbackMessage;
+
+  if (Array.isArray(payload.detail)) {
+    const firstError = payload.detail[0];
+    if (firstError?.loc && firstError?.msg) {
+      const fieldName = firstError.loc[firstError.loc.length - 1];
+      return `${fieldName}: ${firstError.msg}`;
+    }
+    return payload.detail.map((item) => item?.msg).filter(Boolean).join(' | ') || fallbackMessage;
+  }
+
+  if (typeof payload.detail === 'string' && payload.detail.trim()) {
+    return payload.detail;
+  }
+
+  return fallbackMessage;
+}
+
 function notifyUsers(message, type = 'info') {
   if (typeof window.toast === 'function') {
     window.toast(message, type);
@@ -100,6 +119,11 @@ async function handleCreateUserSubmit(event) {
     return;
   }
 
+  if (password.length < 8) {
+    showUsersFormError('La contraseña debe tener al menos 8 caracteres.');
+    return;
+  }
+
   submitBtn.disabled = true;
   submitBtn.textContent = 'Creando...';
 
@@ -114,7 +138,7 @@ async function handleCreateUserSubmit(event) {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      showUsersFormError(payload.detail || 'No se pudo crear el usuario.');
+      showUsersFormError(extractApiErrorMessage(payload, 'No se pudo crear el usuario.'));
       return;
     }
 
