@@ -53,7 +53,7 @@ function renderUsersTable(users) {
   if (!Array.isArray(users) || users.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="2" class="px-4 py-4 text-center text-coffee-500">No hay usuarios registrados</td>
+        <td colspan="3" class="px-4 py-4 text-center text-coffee-500">No hay usuarios registrados</td>
       </tr>
     `;
     return;
@@ -65,10 +65,58 @@ function renderUsersTable(users) {
       <tr class="hover:bg-coffee-50">
         <td class="px-4 py-3 font-mono text-coffee-700">${user.id}</td>
         <td class="px-4 py-3 font-semibold text-coffee-900">${user.username}</td>
+        <td class="px-4 py-3">
+          <div class="flex items-center gap-2">
+            <select id="user-role-${user.id}" class="bg-white border border-coffee-200 rounded-lg px-2.5 py-1.5 text-sm text-coffee-800">
+              <option value="user" ${user.role === 'user' ? 'selected' : ''}>Usuario</option>
+              <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
+            </select>
+            <button onclick="updateUserRole(${user.id})"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-coffee-100 text-coffee-800 hover:bg-coffee-200 transition-all">
+              Guardar
+            </button>
+          </div>
+        </td>
       </tr>
     `,
     )
     .join('');
+}
+
+async function updateUserRole(userId) {
+  const select = document.getElementById(`user-role-${userId}`);
+  if (!select) return;
+
+  const role = select.value;
+  const originalRole = select.dataset.originalRole || role;
+
+  select.disabled = true;
+
+  try {
+    const response = await fetch(`/api/users/${userId}/role`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = extractApiErrorMessage(payload, 'No se pudo actualizar el rol.');
+      notifyUsers(message, 'error');
+      select.value = originalRole;
+      return;
+    }
+
+    select.dataset.originalRole = payload.role || role;
+    notifyUsers('Rol actualizado correctamente', 'success');
+  } catch {
+    notifyUsers('Error de conexión al actualizar rol', 'error');
+    select.value = originalRole;
+  } finally {
+    select.disabled = false;
+  }
 }
 
 async function loadUsers() {
@@ -79,7 +127,7 @@ async function loadUsers() {
   if (tbody) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="2" class="px-4 py-4 text-center text-coffee-500">Cargando usuarios...</td>
+        <td colspan="3" class="px-4 py-4 text-center text-coffee-500">Cargando usuarios...</td>
       </tr>
     `;
   }
@@ -96,6 +144,13 @@ async function loadUsers() {
 
     const users = await response.json();
     renderUsersTable(users);
+
+    users.forEach((user) => {
+      const select = document.getElementById(`user-role-${user.id}`);
+      if (select) {
+        select.dataset.originalRole = user.role || 'user';
+      }
+    });
   } catch {
     notifyUsers('Error de conexión al cargar usuarios', 'error');
     renderUsersTable([]);
@@ -155,6 +210,7 @@ async function handleCreateUserSubmit(event) {
 }
 
 window.loadUsers = loadUsers;
+window.updateUserRole = updateUserRole;
 
 window.addEventListener('DOMContentLoaded', () => {
   const createForm = document.getElementById('users-create-form');

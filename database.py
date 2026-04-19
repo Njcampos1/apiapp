@@ -66,7 +66,9 @@ CREATE_USERS_TABLE = """
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     username        TEXT NOT NULL UNIQUE,
-    hashed_password TEXT NOT NULL
+    hashed_password TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'user',
+    CHECK (role IN ('admin', 'user'))
 );
 """
 
@@ -111,6 +113,14 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE orders ADD COLUMN manifest_id INTEGER REFERENCES manifests(id)")
             await db.commit()
             logger.info("Columna manifest_id añadida a orders")
+        except aiosqlite.OperationalError:
+            pass  # La columna ya existe
+
+        # Migración: añadir role a users si la columna aún no existe
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            await db.commit()
+            logger.info("Columna role añadida a users")
         except aiosqlite.OperationalError:
             pass  # La columna ya existe
 
@@ -270,11 +280,13 @@ class UserRow(TypedDict):
     id: int
     username: str
     hashed_password: str
+    role: str
 
 
 class PublicUserRow(TypedDict):
     id: int
     username: str
+    role: str
 
 
 async def get_user_by_username(username: str) -> Optional[UserRow]:
@@ -282,7 +294,7 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, username, hashed_password FROM users WHERE username = ?",
+            "SELECT id, username, hashed_password, role FROM users WHERE username = ?",
             (username,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -294,15 +306,17 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
         id=row["id"],
         username=row["username"],
         hashed_password=row["hashed_password"],
+        role=row["role"],
     )
 
 
-async def create_user(username: str, hashed_password: str) -> int:
+async def create_user(username: str, hashed_password: str, role: str = "user") -> int:
     """Crea un usuario y devuelve su ID."""
+    normalized_role = role if role in {"admin", "user"} else "user"
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO users (username, hashed_password) VALUES (?, ?)",
-            (username, hashed_password),
+            "INSERT INTO users (username, hashed_password, role) VALUES (?, ?, ?)",
+            (username, hashed_password, normalized_role),
         )
         await db.commit()
         return cursor.lastrowid
@@ -314,7 +328,7 @@ async def get_all_users() -> List[PublicUserRow]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, username FROM users ORDER BY username ASC"
+            "SELECT id, username, role FROM users ORDER BY username ASC"
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -323,6 +337,7 @@ async def get_all_users() -> List[PublicUserRow]:
             PublicUserRow(
                 id=row["id"],
                 username=row["username"],
+                role=row["role"],
             )
         )
 
@@ -333,10 +348,45 @@ async def ensure_default_admin_user(username: str, hashed_password: str) -> None
     """Crea el usuario admin por defecto si aún no existe."""
     existing = await get_user_by_username(username)
     if existing:
+        if existing["role"] != "admin":
+            await update_user_role(existing["id"], "admin")
+            logger.info("Usuario administrador por defecto actualizado a rol admin: %s", username)
         return
 
-    await create_user(username, hashed_password)
+    await create_user(username, hashed_password, role="admin")
     logger.info("Usuario administrador por defecto creado: %s", username)
+
+
+async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, username, role FROM users WHERE id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return PublicUserRow(
+        id=row["id"],
+        username=row["username"],
+        role=row["role"],
+    )
+
+
+async def update_user_role(user_id: int, role: str) -> bool:
+    if role not in {"admin", "user"}:
+        return False
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE users SET role = ? WHERE id = ?",
+            (role, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 # ── Tokens de Mercado Libre ──────────────────────────────────────────────────

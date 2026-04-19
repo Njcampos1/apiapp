@@ -53,6 +53,7 @@ from database import (
     create_user,
     ensure_default_admin_user,
     get_all_users,
+    get_user_by_id,
     get_user_by_username,
     init_db,
     upsert_order,
@@ -65,6 +66,7 @@ from database import (
     close_manifest,
     get_manifest_orders,
     get_open_manifest_info,
+    update_user_role,
 )
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
@@ -109,6 +111,11 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     username: str
+    role: str
+
+
+class UserRoleUpdateRequest(BaseModel):
+    role: str = Field(pattern="^(admin|user)$")
 
 
 def _require_non_empty_string(value: Any, field_path: str) -> str:
@@ -378,9 +385,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(username: str) -> str:
+def create_access_token(username: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    role = "admin" if username == settings.DEFAULT_ADMIN_USERNAME else "user"
     payload = {
         "sub": username,
         "role": role,
@@ -418,7 +424,8 @@ async def get_current_user(
     return {
         "id": user["id"],
         "username": user["username"],
-        "is_admin": user["username"] == settings.DEFAULT_ADMIN_USERNAME,
+        "role": user["role"],
+        "is_admin": user["role"] == "admin",
     }
 
 
@@ -558,11 +565,12 @@ async def login(payload: LoginRequest):
             detail="Credenciales inválidas",
         )
 
-    access_token = create_access_token(user["username"])
+    access_token = create_access_token(user["username"], user["role"])
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "is_admin": user["username"] == settings.DEFAULT_ADMIN_USERNAME,
+        "role": user["role"],
+        "is_admin": user["role"] == "admin",
     }
 
 
@@ -581,9 +589,10 @@ async def create_user_endpoint(
     user_id = await create_user(
         username=payload.username,
         hashed_password=hash_password(payload.password),
+        role="user",
     )
 
-    return UserResponse(id=user_id, username=payload.username)
+    return UserResponse(id=user_id, username=payload.username, role="user")
 
 
 @app.get("/api/users", tags=["users"], response_model=list[UserResponse])
@@ -591,7 +600,47 @@ async def list_users_endpoint(
     _admin_user: dict[str, Any] = Depends(get_admin_user),
 ):
     users = await get_all_users()
-    return [UserResponse(id=u["id"], username=u["username"]) for u in users]
+    return [UserResponse(id=u["id"], username=u["username"], role=u["role"]) for u in users]
+
+
+@app.put("/api/users/{user_id}/role", tags=["users"], response_model=UserResponse)
+async def update_user_role_endpoint(
+    user_id: int,
+    payload: UserRoleUpdateRequest,
+    admin_user: dict[str, Any] = Depends(get_admin_user),
+):
+    target_user = await get_user_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    if target_user["id"] == admin_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes modificar tu propio rol",
+        )
+
+    updated = await update_user_role(user_id, payload.role)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo actualizar el rol del usuario",
+        )
+
+    refreshed_user = await get_user_by_id(user_id)
+    if refreshed_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado",
+        )
+
+    return UserResponse(
+        id=refreshed_user["id"],
+        username=refreshed_user["username"],
+        role=refreshed_user["role"],
+    )
 
 
 @app.get("/api/skus", tags=["packs"])
