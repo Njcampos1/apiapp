@@ -330,12 +330,12 @@ async function downloadBulkMeliZpl() {
     // Marcar los pedidos descargados como completados en el cache local
     // para que aparezcan con el banner "Etiqueta ya generada" en esta sesión
     const allOrders = AppState.get('allOrders') || [];
-    ids.forEach(id => {
-      const order = allOrders.find(o => String(o.id) === String(id));
-      if (order) order.status = 'completed';
+    const idSet = new Set(ids.map(String));
+    AppState.set({
+      allOrders: allOrders.map(o =>
+        idSet.has(String(o.id)) ? { ...o, status: 'completed' } : o
+      )
     });
-
-    AppState.set({ allOrders: allOrders });
 
     // Refrescar la vista (los pedidos procesados quedan visibles pero marcados)
     renderOrders();
