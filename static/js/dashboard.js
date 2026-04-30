@@ -11,7 +11,7 @@
  * @param {string} filter - 'all', 'woocommerce', 'mercadolibre', 'preparing'
  */
 function setFilter(filter) {
-  currentFilter = filter;
+  AppState.set({ currentFilter: filter });
 
   // Estilos de pills: activo vs inactivo
   const pills = {
@@ -55,6 +55,7 @@ function updateBulkButton() {
   const badge      = document.getElementById('bulk-count-badge');
   const pdfBadge   = document.getElementById('bulk-pdf-count-badge');
   const selectAll  = document.getElementById('select-all-meli');
+  const currentFilter = AppState.get('currentFilter');
 
   if (currentFilter === 'mercadolibre' && checked.length > 0) {
     zplBtn.classList.remove('hidden');
@@ -115,7 +116,8 @@ function toggleAllMeli(checked) {
  * @param {string|number} id - ID del pedido
  */
 function openMeliDetailModal(source, id) {
-  const order = _orderCache[`${source}:${id}`];
+  const orderCache = AppState.get('_orderCache') || {};
+  const order = orderCache[`${source}:${id}`];
   if (!order) { toast('No se pudo cargar el detalle del pedido', 'error'); return; }
 
   const meta = order.platform_meta || {};

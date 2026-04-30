@@ -26,6 +26,7 @@ function handleScanInput(e) {
     if (!id) { input.focus(); return; }
 
     // Doble escaneo: mismo código cuando ya hay un pedido cargado
+    const currentOrder = AppState.get('currentOrder');
     if (currentOrder && (id === String(currentOrder.id) || id === getOrderScanCode(currentOrder))) {
       input.value = '';
       autoPrintAndComplete();
@@ -126,7 +127,7 @@ function renderScanResult(order) {
     noteSection.classList.add('hidden');
   }
 
-  lastScannedId = visibleId;
+  AppState.set({ lastScannedId: visibleId });
   document.getElementById('zpl-confirm-section').classList.add('hidden');
   document.getElementById('scan-result').classList.remove('hidden');
 }
@@ -135,7 +136,7 @@ function renderScanResult(order) {
  * Resetea el estado del scanner (limpia input y resultados)
  */
 function resetScanner() {
-  currentOrder = null;
+  AppState.set({ currentOrder: null });
   document.getElementById('scan-input').value = '';
   document.getElementById('scan-result').classList.add('hidden');
   document.getElementById('scan-error').classList.add('hidden');

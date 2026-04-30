@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 720
     DEFAULT_ADMIN_USERNAME: str = "admin"
     DEFAULT_ADMIN_PASSWORD: str = "admin123"
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:8000"]
 
     # ── Azure (no requerido en local) ─────────────────────────────
     AZURE_REGISTRY:   str = ""

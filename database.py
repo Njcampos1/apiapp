@@ -5,6 +5,7 @@ Guarda estados intermedios de pedidos para sobrevivir reinicios del servidor.
 import aiosqlite
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, TypedDict
@@ -15,6 +16,33 @@ from models.order import NormalizedOrder, OrderStatus
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(settings.DB_PATH)
+_DB_CONN: aiosqlite.Connection | None = None
+
+
+async def _ensure_db_connection() -> aiosqlite.Connection:
+    global _DB_CONN
+    if _DB_CONN is None:
+        _DB_CONN = await aiosqlite.connect(DB_PATH)
+        await _DB_CONN.execute("PRAGMA journal_mode=WAL")
+        await _DB_CONN.execute("PRAGMA busy_timeout=5000")
+        await _DB_CONN.commit()
+    return _DB_CONN
+
+
+@asynccontextmanager
+async def get_db() -> aiosqlite.Connection:
+    db = await _ensure_db_connection()
+    try:
+        yield db
+    finally:
+        pass
+
+
+async def close_db() -> None:
+    global _DB_CONN
+    if _DB_CONN is not None:
+        await _DB_CONN.close()
+        _DB_CONN = None
 
 CREATE_ORDERS_TABLE = """
 CREATE TABLE IF NOT EXISTS orders (
@@ -75,7 +103,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 async def init_db() -> None:
     """Crea las tablas si no existen y aplica migraciones pendientes."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(CREATE_ORDERS_TABLE)
         await db.execute(CREATE_EVENTS_TABLE)
         await db.execute(CREATE_MELI_TOKENS_TABLE)
@@ -142,7 +170,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
             order.completed_at = datetime.utcnow()
 
         # Auto-asignar al manifest abierto actual si no tiene uno ya asignado
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 "SELECT manifest_id FROM orders WHERE id = ? AND source = ?",
                 (order.id, order.source.value)
@@ -156,7 +184,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
     completed_at = order.completed_at.isoformat() if order.completed_at else None
     label_printed_at = order.label_printed_at.isoformat() if order.label_printed_at else None
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """
             INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at, manifest_id)
@@ -213,7 +241,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
 
 async def get_local_status(order_id: str, source: str) -> Optional[OrderStatus]:
     """Devuelve el estado local de un pedido o None si no está en la BD."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT status FROM orders WHERE id = ? AND source = ?",
             (order_id, source),

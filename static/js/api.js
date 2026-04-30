@@ -122,7 +122,7 @@ async function loadOrders() {
     }
 
     // Guardar todos los pedidos en el array global y delegar al render
-    allOrders = d.orders || [];
+    AppState.set({ allOrders: d.orders || [] });
     renderOrders();
 
     // Actualizar contador de manifiestos
@@ -329,10 +329,13 @@ async function downloadBulkMeliZpl() {
 
     // Marcar los pedidos descargados como completados en el cache local
     // para que aparezcan con el banner "Etiqueta ya generada" en esta sesión
+    const allOrders = AppState.get('allOrders') || [];
     ids.forEach(id => {
       const order = allOrders.find(o => String(o.id) === String(id));
       if (order) order.status = 'completed';
     });
+
+    AppState.set({ allOrders: allOrders });
 
     // Refrescar la vista (los pedidos procesados quedan visibles pero marcados)
     renderOrders();
@@ -532,9 +535,10 @@ async function searchOrder() {
   document.getElementById('scan-result').classList.add('hidden');
   document.getElementById('scan-error').classList.add('hidden');
   document.getElementById('scan-loading').classList.remove('hidden');
-  currentOrder = null;
+  AppState.set({ currentOrder: null });
 
   try {
+    const allOrders = AppState.get('allOrders') || [];
     const fromCache = (allOrders || []).find((o) => {
       const oid = String(o.id || '');
       const shippingId = String((o.platform_meta && o.platform_meta.shipping_id) || '');
@@ -572,7 +576,7 @@ async function searchOrder() {
     }
 
     const order = await r.json();
-    currentOrder = order;
+    AppState.set({ currentOrder: order });
     renderScanResult(order);
 
   } catch (err) {
@@ -590,6 +594,7 @@ async function searchOrder() {
  * Descarga PDF de picking del pedido actual en el scanner
  */
 async function downloadPickingPdf() {
+  const currentOrder = AppState.get('currentOrder');
   if (!currentOrder) return;
   const { id, source } = currentOrder;
   try {
@@ -612,6 +617,7 @@ async function downloadPickingPdf() {
  * Descarga archivo ZPL del pedido actual en el scanner
  */
 async function downloadZpl() {
+  const currentOrder = AppState.get('currentOrder');
   if (!currentOrder) return;
   const { id, source } = currentOrder;
   try {
@@ -639,6 +645,7 @@ async function downloadZpl() {
  * @param {boolean} autoReset - Si debe resetear el scanner automáticamente
  */
 async function printLabel(autoReset = false) {
+  const currentOrder = AppState.get('currentOrder');
   if (!currentOrder) return;
 
   const { id, source } = currentOrder;
@@ -661,10 +668,9 @@ async function printLabel(autoReset = false) {
 
     document.getElementById('zpl-confirm-section').classList.add('hidden');
     toast(`Pedido #${id} completado ✅`, 'success');
-    currentOrder  = null;
-    lastScannedId = null;
+    AppState.set({ currentOrder: null, lastScannedId: null });
 
-    if (activeView === 'dashboard') loadOrders();
+    if (AppState.get('activeView') === 'dashboard') loadOrders();
 
     if (autoReset) {
       setTimeout(resetScanner, 1500);
@@ -680,6 +686,7 @@ async function printLabel(autoReset = false) {
  * @param {string} newStatus - Nuevo estado: 'processing', 'completed', 'cancelled'
  */
 async function setStatus(newStatus) {
+  const currentOrder = AppState.get('currentOrder');
   if (!currentOrder) return;
   const { id, source } = currentOrder;
   const labels = { processing: 'Procesando', completed: 'Completado', cancelled: 'Cancelado' };
@@ -703,8 +710,8 @@ async function setStatus(newStatus) {
     }
     resetScanner();
 
-    currentOrder = null;
-    if (activeView === 'dashboard') loadOrders();
+    AppState.set({ currentOrder: null });
+    if (AppState.get('activeView') === 'dashboard') loadOrders();
 
   } catch {
     toast('Error de conexión', 'error');

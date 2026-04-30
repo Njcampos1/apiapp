@@ -90,6 +90,56 @@ class _TokenData:
 
 # ── Proveedor ─────────────────────────────────────────────────────────────────
 
+def _extract_phone(receiver: dict, buyer: dict) -> str:
+    """
+    Extrae teléfono priorizando receiver_address.phone y fallback a buyer.phone.
+    """
+    phone_str = ""
+    rec_phone = receiver.get("phone") or {}
+    if isinstance(rec_phone, dict) and rec_phone.get("number"):
+        area_code = str(rec_phone.get("area_code", "")).strip()
+        num = str(rec_phone.get("number", "")).strip()
+        phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+    if not phone_str:
+        phone_data = buyer.get("phone") or {}
+        if isinstance(phone_data, dict):
+            area_code = str(phone_data.get("area_code", "")).strip()
+            num = str(phone_data.get("number", "")).strip()
+            if num:
+                phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+    return phone_str
+
+
+def _extract_receiver_name(receiver: dict, buyer: dict) -> tuple[str, str, str]:
+    """Extrae nombre y apellido priorizando receiver_name."""
+    receiver_name_raw = receiver.get("receiver_name", "").strip()
+    if receiver_name_raw:
+        name_parts = receiver_name_raw.split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+    else:
+        first_name = buyer.get("first_name", "")
+        last_name = buyer.get("last_name", "")
+    return first_name, last_name, receiver_name_raw
+
+
+def _extract_rut(raw: dict, buyer: dict, receiver: dict) -> str:
+    """Extrae RUT usando billing_info y fallbacks según reglas actuales."""
+    billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
+    rut = (billing_info.get("doc_number") or "").strip()
+    if not rut and isinstance(billing_info, list):
+        for entry in billing_info:
+            rut = (entry.get("doc_number") or "").strip()
+            if rut:
+                break
+    if not rut:
+        receiver_doc_type = receiver.get("receiver_id_type", "")
+        receiver_doc_number = receiver.get("receiver_id_number", "")
+        if receiver_doc_type and receiver_doc_number:
+            rut = f"{receiver_doc_number}".strip()
+    return rut
+
+
 class MeliProvider(BaseOrderProvider):
     """
     Integración con Mercado Libre.
@@ -518,6 +568,7 @@ class MeliProvider(BaseOrderProvider):
             )
             return False
 
+
     def normalize(self, raw: dict) -> NormalizedOrder:
         """
         Mapea el JSON crudo de un pedido de Mercado Libre al modelo interno.
@@ -538,76 +589,10 @@ class MeliProvider(BaseOrderProvider):
         state_obj     = receiver.get("state")   or {}
         country_obj   = receiver.get("country") or {}
 
-        buyer      = raw.get("buyer") or {}
-        # ── Teléfono ────────────────────────────────────────────────────────
-        # IMPORTANTE sobre teléfonos en MeLi:
-        # - receiver_address.phone es más confiable que buyer.phone
-        # - buyer.phone suele llegar vacío en /orders/search (pero sí en /orders/{id})
-        # - MeLi puede ocultar dígitos centrales por privacidad (ej: "9XXXX1234")
-        # - El formato es: {area_code: "9", number: "12345678"}
-        #
-        # Estrategia:
-        # 1. Priorizar receiver_address.phone (dirección de envío real)
-        # 2. Fallback a buyer.phone (titular de cuenta, menos fiable)
-        phone_str  = ""
-        rec_phone  = receiver.get("phone") or {}
-        if isinstance(rec_phone, dict) and rec_phone.get("number"):
-            area_code = str(rec_phone.get("area_code", "")).strip()
-            num       = str(rec_phone.get("number", "")).strip()
-            phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
-        if not phone_str:
-            # Fallback: buyer.phone
-            phone_data = buyer.get("phone") or {}
-            if isinstance(phone_data, dict):
-                area_code = str(phone_data.get("area_code", "")).strip()
-                num       = str(phone_data.get("number", "")).strip()
-                if num:
-                    phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
-
-        # ── Nombre del destinatario ─────────────────────────────────────────
-        # Priorizar receiver_name de la dirección de envío (más confiable que buyer).
-        # El objeto buyer a veces contiene datos del titular de la cuenta, no del receptor.
-        receiver_name_raw = receiver.get("receiver_name", "").strip()
-        if receiver_name_raw:
-            name_parts = receiver_name_raw.split(" ", 1)
-            first_name = name_parts[0]
-            last_name  = name_parts[1] if len(name_parts) > 1 else ""
-        else:
-            first_name = buyer.get("first_name", "")
-            last_name  = buyer.get("last_name", "")
-
-        # ── RUT de facturación/envío ────────────────────────────────────────
-        # IMPORTANTE sobre datos PII de MeLi:
-        # - Mercado Libre REVOCA el acceso a datos PII (RUT, teléfono completo, nombre)
-        #   una vez que el pedido está en estado shipped/delivered/cancelled
-        # - billing_info solo está disponible si:
-        #   1. El comprador ingresó RUT al hacer el pedido (no es obligatorio)
-        #   2. El envío NO está en estados shipped/delivered/cancelled
-        # - get_pending_orders() ya aplica este filtro en línea 240 (PII Guard)
-        # - Si el RUT llega vacío aquí, significa que:
-        #   a) El comprador no lo ingresó, o
-        #   b) MeLi ya bloqueó el acceso por estado del envío
-        #
-        # Estrategia de extracción:
-        # - Priorizar billing_info de nivel raíz (endpoint /orders/{id}/billing_info)
-        # - Fallback a buyer.billing_info (menos confiable, puede ser del titular de cuenta)
-        # - Fallback adicional: receiver_address puede tener doc_type/doc_number
-        # - Manejar caso de billing_info como array (formato antiguo de MeLi)
-        billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
-        rut = (billing_info.get("doc_number") or "").strip()
-        # Segundo fallback: dentro del array billing_info si viene como lista
-        if not rut and isinstance(billing_info, list):
-            for entry in billing_info:
-                rut = (entry.get("doc_number") or "").strip()
-                if rut:
-                    break
-        # Tercer fallback: intentar obtener de receiver_address
-        # (algunos vendedores pueden incluir doc_number en la dirección de envío)
-        if not rut:
-            receiver_doc_type = receiver.get("receiver_id_type", "")
-            receiver_doc_number = receiver.get("receiver_id_number", "")
-            if receiver_doc_type and receiver_doc_number:
-                rut = f"{receiver_doc_number}".strip()
+        buyer = raw.get("buyer") or {}
+        phone_str = _extract_phone(receiver, buyer)
+        first_name, last_name, receiver_name_raw = _extract_receiver_name(receiver, buyer)
+        rut = _extract_rut(raw, buyer, receiver)
 
         # ── Estado logístico real del envío en MeLi ─────────────────────────
         shipping_status = shipping_raw.get("status", "")

@@ -69,6 +69,7 @@ from database import (
     get_open_manifest_info,
     update_username,
     update_user_role,
+    close_db,
 )
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
@@ -518,6 +519,7 @@ async def lifespan(app: FastAPI):
     for p in _providers.values():
         if hasattr(p, "aclose"):
             await p.aclose()
+    await close_db()
     logger.info("App detenida — conexiones cerradas")
 
 
@@ -531,7 +533,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

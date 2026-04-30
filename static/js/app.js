@@ -10,16 +10,38 @@
 // ESTADO GLOBAL
 // ═══════════════════════════════════════════════════════════════
 
-let currentOrder    = null;
-let activeView      = 'dashboard';
-let lastScannedId   = null;
-const DEFAULT_SOURCE = 'woocommerce';
+const AppState = (() => {
+  const state = {
+    currentOrder: null,
+    activeView: 'dashboard',
+    lastScannedId: null,
+    allOrders: [],
+    currentFilter: 'all',
+    _orderCache: {},
+    appBootstrapped: false,
+  };
+  const listeners = new Set();
 
-// Estado del dashboard
-let allOrders     = [];   // Todos los pedidos recibidos de la API
-let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'preparing'
-let _orderCache   = {};    // Cache de objetos de pedido para el modal MeLi: "source:id" → order
-let appBootstrapped = false;
+  return {
+    get(key) {
+      return key ? state[key] : { ...state };
+    },
+    set(patch) {
+      if (!patch || typeof patch !== 'object') return;
+      Object.assign(state, patch);
+      listeners.forEach((listener) => listener(state, patch));
+    },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+})();
+
+window.AppState = AppState;
+
+const DEFAULT_SOURCE = 'woocommerce';
 
 
 function updateAdminNavigationVisibility() {
@@ -67,14 +89,14 @@ function showAppView() {
 }
 
 function bootstrapAuthenticatedApp() {
-  if (appBootstrapped) return;
+  if (AppState.get('appBootstrapped')) return;
 
   setFilter('all');
   loadOrders();
   loadManifestInfo();
   pingPrinter();
   setInterval(pingPrinter, 30_000);
-  appBootstrapped = true;
+  AppState.set({ appBootstrapped: true });
 }
 
 function checkAuth() {
@@ -178,7 +200,7 @@ window.handleUnauthorized = () => {
  * @param {string} view - 'dashboard', 'scanner', 'tools'
  */
 function showView(view) {
-  activeView = view;
+  AppState.set({ activeView: view });
   document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
   document.getElementById('view-scanner').classList.toggle('hidden', view !== 'scanner');
   document.getElementById('view-tools').classList.toggle('hidden', view !== 'tools');
@@ -227,7 +249,7 @@ document.addEventListener('keydown', (e) => {
 
 // Auto-focus en scanner cuando se hace click en el fondo
 document.addEventListener('click', (e) => {
-  if (activeView === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
+  if (AppState.get('activeView') === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
     document.getElementById('scan-input').focus();
   }
 });
