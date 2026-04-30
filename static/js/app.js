@@ -195,39 +195,35 @@ window.handleUnauthorized = () => {
 // NAVEGACIÓN ENTRE VISTAS
 // ═══════════════════════════════════════════════════════════════
 
+const TAB_CLASSES = {
+  active:   'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900',
+  inactive: 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700',
+};
+
+const TAB_IDS = {
+  dashboard: 'tab-dashboard',
+  scanner:   'tab-scanner',
+  tools:     'tab-tools',
+  users:     'nav-users-btn',
+};
+
 /**
  * Cambia la vista activa de la aplicación
  * @param {string} view - 'dashboard', 'scanner', 'tools'
  */
 function showView(view) {
   AppState.set({ activeView: view });
-  document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
-  document.getElementById('view-scanner').classList.toggle('hidden', view !== 'scanner');
-  document.getElementById('view-tools').classList.toggle('hidden', view !== 'tools');
+  ['dashboard', 'scanner', 'tools'].forEach((section) => {
+    document.getElementById(`view-${section}`).classList.toggle('hidden', view !== section);
+  });
   document.getElementById('users-container').classList.toggle('hidden', view !== 'users');
 
-  document.getElementById('tab-dashboard').className =
-    view === 'dashboard'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  document.getElementById('tab-scanner').className =
-    view === 'scanner'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  document.getElementById('tab-tools').className =
-    view === 'tools'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  const navUsersBtn = document.getElementById('nav-users-btn');
-  if (navUsersBtn && !navUsersBtn.classList.contains('hidden')) {
-    navUsersBtn.className =
-      view === 'users'
-        ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-        : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-  }
+  Object.entries(TAB_IDS).forEach(([section, id]) => {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) {
+      el.className = section === view ? TAB_CLASSES.active : TAB_CLASSES.inactive;
+    }
+  });
 
   if (view === 'users' && typeof window.loadUsers === 'function') {
     window.loadUsers();
