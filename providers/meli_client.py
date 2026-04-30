@@ -290,7 +290,7 @@ class MeliProvider(BaseOrderProvider):
             if order_id and shipment_status not in pii_blocked_states:
                 try:
                     billing_data = await self._get(f"/orders/{order_id}/billing_info")
-                    raw["billing_info"] = billing_data
+                    raw["billing_info"] = billing_data.get("billing_info", billing_data)
                 except RuntimeError as exc:
                     # 403 es esperado si el comprador no ingresó RUT o si MeLi bloqueó PII
                     if "403" in str(exc):

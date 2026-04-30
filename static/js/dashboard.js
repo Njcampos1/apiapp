@@ -147,8 +147,17 @@ function openMeliDetailModal(source, id) {
   document.getElementById('modal-logistic').innerHTML      = logisticLabel;
   document.getElementById('modal-name').textContent        = name;
   document.getElementById('modal-nickname').textContent    = ship.full_address || [ship.address_1, ship.city].filter(Boolean).join(', ') || '—';
-  document.getElementById('modal-rut').textContent         = meta.rut || '—';
-  document.getElementById('modal-phone').textContent       = ship.phone || '—';
+  const shippingStatus = (meta.shipping_status || '').toLowerCase();
+  const piiBlockedStates = ['shipped', 'delivered', 'dropped_off', 'cancelled'];
+  const piiBlocked = piiBlockedStates.includes(shippingStatus);
+
+  const rutText = meta.rut || '';
+  const phoneText = ship.phone || '';
+
+  document.getElementById('modal-rut').textContent =
+    rutText || (piiBlocked ? 'No disponible (pedido ya despachado)' : 'No informado por el comprador');
+  document.getElementById('modal-phone').textContent =
+    phoneText || (piiBlocked ? 'No disponible (pedido ya despachado)' : '—');
   document.getElementById('modal-shipping-status').textContent = meta.shipping_status || '—';
 
   // Mostrar nota del cliente si existe
