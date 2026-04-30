@@ -24,6 +24,7 @@ async def _ensure_db_connection() -> aiosqlite.Connection:
     if _DB_CONN is None:
         _DB_CONN = await aiosqlite.connect(DB_PATH)
         await _DB_CONN.execute("PRAGMA journal_mode=WAL")
+        await _DB_CONN.execute("PRAGMA synchronous=NORMAL")
         await _DB_CONN.execute("PRAGMA busy_timeout=5000")
         await _DB_CONN.commit()
     return _DB_CONN
@@ -258,7 +259,7 @@ async def get_local_status(order_id: str, source: str) -> Optional[OrderStatus]:
 async def log_event(order_id: str, source: str, event: str, detail: str = "") -> None:
     """Registra un evento de auditoría en la BD."""
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO order_events (order_id, source, event, detail, ts) VALUES (?,?,?,?,?)",
             (order_id, source, event, detail, now),
@@ -273,7 +274,7 @@ async def get_preparing_orders() -> List[NormalizedOrder]:
     permitiendo re-imprimir el PDF si la hoja se perdió en bodega.
     """
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT payload_json FROM orders "
             "WHERE status IN ('preparing', 'labeled') AND source = 'woocommerce' "
@@ -291,7 +292,7 @@ async def get_preparing_orders() -> List[NormalizedOrder]:
 async def get_completed_orders() -> List[NormalizedOrder]:
     """Devuelve todos los pedidos completados desde la BD local para reporte Excel."""
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT payload_json FROM orders WHERE status = 'completed' ORDER BY completed_at DESC"
         ) as cursor:
@@ -319,12 +320,12 @@ class PublicUserRow(TypedDict):
 
 async def get_user_by_username(username: str) -> Optional[UserRow]:
     """Busca un usuario por username."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, hashed_password, role FROM users WHERE username = ?",
             (username,),
         ) as cursor:
+            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
@@ -341,7 +342,7 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
 async def create_user(username: str, hashed_password: str, role: str = "user") -> int:
     """Crea un usuario y devuelve su ID."""
     normalized_role = role if role in {"admin", "user"} else "user"
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "INSERT INTO users (username, hashed_password, role) VALUES (?, ?, ?)",
             (username, hashed_password, normalized_role),
@@ -353,11 +354,11 @@ async def create_user(username: str, hashed_password: str, role: str = "user") -
 async def get_all_users() -> List[PublicUserRow]:
     """Lista todos los usuarios sin exponer contraseñas."""
     users: List[PublicUserRow] = []
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, role FROM users ORDER BY username ASC"
         ) as cursor:
+            cursor.row_factory = aiosqlite.Row
             rows = await cursor.fetchall()
 
     for row in rows:
@@ -386,12 +387,12 @@ async def ensure_default_admin_user(username: str, hashed_password: str) -> None
 
 
 async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, role FROM users WHERE id = ?",
             (user_id,),
         ) as cursor:
+            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
@@ -408,7 +409,7 @@ async def update_user_role(user_id: int, role: str) -> bool:
     if role not in {"admin", "user"}:
         return False
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "UPDATE users SET role = ? WHERE id = ?",
             (role, user_id),
@@ -418,7 +419,7 @@ async def update_user_role(user_id: int, role: str) -> bool:
 
 
 async def update_username(user_id: int, username: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "UPDATE users SET username = ? WHERE id = ?",
             (username, user_id),
@@ -428,7 +429,7 @@ async def update_username(user_id: int, username: str) -> bool:
 
 
 async def delete_user(user_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "DELETE FROM users WHERE id = ?",
             (user_id,),
@@ -451,12 +452,12 @@ async def get_meli_token() -> Optional[MeliTokenRow]:
     Devuelve el único registro de tokens de Mercado Libre o None si aún
     no se ha completado el flujo OAuth.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT access_token, refresh_token, expires_at, seller_id "
             "FROM meli_tokens WHERE id = 1"
         ) as cursor:
+            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
@@ -482,7 +483,7 @@ async def save_meli_token(
     (útil al refrescar tokens sin conocer el seller_id todavía).
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """
             INSERT INTO meli_tokens (id, access_token, refresh_token, expires_at, seller_id, updated_at)
@@ -513,7 +514,7 @@ async def get_or_create_open_manifest() -> int:
     Si no existe ninguno, crea uno nuevo.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Intentar obtener manifest abierto
         async with db.execute(
             "SELECT id FROM manifests WHERE status = 'open' ORDER BY created_at DESC LIMIT 1"
@@ -539,7 +540,7 @@ async def close_manifest(manifest_id: int) -> bool:
     Retorna True si se cerró exitosamente, False si no existe o ya estaba cerrado.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """
             UPDATE manifests
@@ -557,7 +558,7 @@ async def get_manifest_orders(manifest_id: int) -> List[NormalizedOrder]:
     Devuelve todos los pedidos asociados a un manifest específico.
     """
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """
             SELECT payload_json FROM orders
@@ -582,7 +583,7 @@ async def get_open_manifest_info() -> Optional[dict]:
     Devuelve información del manifest abierto actual o None si no existe.
     Retorna: {"id": int, "created_at": str, "order_count": int}
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """
             SELECT m.id, m.created_at, COUNT(o.id) as order_count
@@ -612,7 +613,7 @@ async def migrate_orphan_orders() -> None:
     Crea un manifest histórico cerrado para agruparlos.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Verificar si hay pedidos huérfanos
         async with db.execute(
             "SELECT COUNT(*) FROM orders WHERE status = 'completed' AND manifest_id IS NULL"
