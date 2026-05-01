@@ -325,17 +325,16 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
             "SELECT id, username, hashed_password, role FROM users WHERE username = ?",
             (username,),
         ) as cursor:
-            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
         return None
 
     return UserRow(
-        id=row["id"],
-        username=row["username"],
-        hashed_password=row["hashed_password"],
-        role=row["role"],
+        id=row[0],
+        username=row[1],
+        hashed_password=row[2],
+        role=row[3],
     )
 
 
@@ -358,15 +357,14 @@ async def get_all_users() -> List[PublicUserRow]:
         async with db.execute(
             "SELECT id, username, role FROM users ORDER BY username ASC"
         ) as cursor:
-            cursor.row_factory = aiosqlite.Row
             rows = await cursor.fetchall()
 
     for row in rows:
         users.append(
             PublicUserRow(
-                id=row["id"],
-                username=row["username"],
-                role=row["role"],
+                id=row[0],
+                username=row[1],
+                role=row[2],
             )
         )
 
@@ -392,16 +390,15 @@ async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
             "SELECT id, username, role FROM users WHERE id = ?",
             (user_id,),
         ) as cursor:
-            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
         return None
 
     return PublicUserRow(
-        id=row["id"],
-        username=row["username"],
-        role=row["role"],
+        id=row[0],
+        username=row[1],
+        role=row[2],
     )
 
 
@@ -457,17 +454,16 @@ async def get_meli_token() -> Optional[MeliTokenRow]:
             "SELECT access_token, refresh_token, expires_at, seller_id "
             "FROM meli_tokens WHERE id = 1"
         ) as cursor:
-            cursor.row_factory = aiosqlite.Row
             row = await cursor.fetchone()
 
     if row is None:
         return None
 
     return MeliTokenRow(
-        access_token=row["access_token"],
-        refresh_token=row["refresh_token"],
-        expires_at=datetime.fromisoformat(row["expires_at"]),
-        seller_id=row["seller_id"] or "",
+        access_token=row[0],
+        refresh_token=row[1],
+        expires_at=datetime.fromisoformat(row[2]),
+        seller_id=row[3] or "",
     )
 
 
