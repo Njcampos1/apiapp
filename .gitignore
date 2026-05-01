@@ -1,5 +1,7 @@
 .env
 data/pedidos.db
+data/pedidos.db-shm
+data/pedidos.db-wal
 pedidos.db
 __pycache__/
 *.pyc
