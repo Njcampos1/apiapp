@@ -69,12 +69,14 @@ from database import (
     get_open_manifest_info,
     update_username,
     update_user_role,
+    close_db,
 )
 from models.order import NormalizedOrder, OrderStatus, OrderSource
 from providers.base_provider import BaseOrderProvider
 from providers.woo_client import WooCommerceProvider
 from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
+from services import excel_service
 from services.excel_service import generate_excel
 from services.zpl_service import ZPLService, build_zpl_main, build_zpl_note
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
@@ -290,7 +292,10 @@ def validate_skus_schema(payload: Any) -> None:
             )
 
         validate_common_product_fields(item, path)
-        _require_non_empty_string(item.get("categoria"), f"{path}.categoria")
+        categoria = _require_non_empty_string(item.get("categoria"), f"{path}.categoria")
+        categoria_norm = categoria.strip().lower()
+        if "limpieza" in categoria_norm or "detergente" in categoria_norm:
+            _require_non_empty_string(item.get("detergente_tipo"), f"{path}.detergente_tipo")
 
 
 def _build_sku_dict(catalogo: dict[str, Any], category: str) -> dict[str, dict[str, Any]]:
@@ -499,8 +504,11 @@ async def lifespan(app: FastAPI):
     global _providers
     await init_db()
 
-    if not settings.SECRET_KEY.strip():
-        raise RuntimeError("SECRET_KEY no está configurada. Define una clave segura en .env")
+    if len(settings.SECRET_KEY.strip()) < 32:
+        raise RuntimeError(
+            "SECRET_KEY debe tener al menos 32 caracteres. "
+            "Genera una con: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
 
     if settings.DEFAULT_ADMIN_PASSWORD == "admin123":
         logger.warning(
@@ -518,6 +526,7 @@ async def lifespan(app: FastAPI):
     for p in _providers.values():
         if hasattr(p, "aclose"):
             await p.aclose()
+    await close_db()
     logger.info("App detenida — conexiones cerradas")
 
 
@@ -531,9 +540,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 templates = Jinja2Templates(directory="templates")
@@ -817,6 +827,7 @@ async def update_skus(
         )
 
     pack_service._load_full_catalog.cache_clear()
+    excel_service._load_sku_data.cache_clear()
 
     admin_username = str(_admin_user.get("username", "admin"))
     append_skus_audit_entry(

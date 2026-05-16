@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from dataclasses import dataclass, field
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import List
+from typing import Collection, List
 
 import pandas as pd
 
@@ -70,21 +72,46 @@ def _load_rm_comunas() -> frozenset[str]:
     return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
-def _load_sku_data() -> tuple[dict[str, int], set[str], set[str]]:
+@dataclass(frozen=True)
+class SkuCatalogData:
+    multipliers: dict[str, int] = field(default_factory=dict)
+    unit_skus: frozenset[str] = field(default_factory=frozenset)
+    non_cafe_meli_skus: frozenset[str] = field(default_factory=frozenset)
+    chocolate_skus: frozenset[str] = field(default_factory=frozenset)
+    detergente_35: dict[str, int] = field(default_factory=dict)
+    detergente_60: dict[str, int] = field(default_factory=dict)
+    detergente_mixed_skus: frozenset[str] = field(default_factory=frozenset)
+
+
+@lru_cache(maxsize=1)
+def _load_sku_data() -> SkuCatalogData:
     """
-    Devuelve:
-    - Diccionario de multiplicadores por SKU: {sku: cantidad_total_capsulas}
-    - Set de SKUs unitarios (sku_unitario) que son componentes de packs
-    - Set de SKUs de Mercado Libre que NO deben contar como café
-      (otros_productos: limpieza/hogar)
+    Devuelve catálogo SKU normalizado. Cacheado con lru_cache(maxsize=1).
+    Invalidar con: _load_sku_data.cache_clear().
     """
-    with open(_SKU_JSON_PATH, encoding="utf-8") as f:
-        data = json.load(f)
+    multipliers: dict[str, int] = {}
+    unit_skus: set[str] = set()
+    non_cafe_meli_skus: set[str] = set()
+    chocolate_skus: set[str] = set()
+    detergente_35_multipliers: dict[str, int] = {}
+    detergente_60_multipliers: dict[str, int] = {}
+    detergente_mixed_skus: set[str] = set()
+
+    try:
+        with open(_SKU_JSON_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return SkuCatalogData(
+            multipliers=multipliers,
+            unit_skus=frozenset(unit_skus),
+            non_cafe_meli_skus=frozenset(non_cafe_meli_skus),
+            chocolate_skus=frozenset(CHOCOLATE_SKUS),
+            detergente_35=dict(DETERGENTE_35_SKU_MULTIPLIERS),
+            detergente_60=dict(DETERGENTE_60_SKU_MULTIPLIERS),
+            detergente_mixed_skus=frozenset({DETERGENTE_MIXED_SKU}),
+        )
 
     catalogo = data.get("catalogo", {})
-    multipliers = {}
-    unit_skus = set()
-    non_cafe_meli_skus = set()
 
     # Procesar packs prearmados
     for pack in catalogo.get("packs_prearmados", []):
@@ -120,21 +147,79 @@ def _load_sku_data() -> tuple[dict[str, int], set[str], set[str]]:
             if sku_alias and cantidad:
                 multipliers[sku_alias] = cantidad
 
-    # SKUs de otros productos de Mercado Libre (detergentes, cobertores, etc.)
+    def _get_detergente_tipo(item_data: dict) -> str | None:
+        tipo_raw = item_data.get("detergente_tipo")
+        if isinstance(tipo_raw, str):
+            tipo = _normalize_text(tipo_raw)
+            if tipo in {"35", "60", "mixto", "mixed"}:
+                return "mixto" if tipo in {"mixto", "mixed"} else tipo
+        return None
+
+    # SKUs de otros productos (detergentes, cobertores, chocolates, etc.)
     for item in catalogo.get("otros_productos", []):
-        canales = set(item.get("canales_venta", []))
-        if "mercadolibre" not in canales:
-            continue
-
         sku_principal = item.get("sku_principal")
-        if sku_principal:
-            non_cafe_meli_skus.add(str(sku_principal))
+        sku_aliases = item.get("skus_alias", [])
+        canales = set(item.get("canales_venta", []))
 
-        for sku_alias in item.get("skus_alias", []):
-            if sku_alias:
-                non_cafe_meli_skus.add(str(sku_alias))
+        # Excluir de café solo en Mercado Libre
+        if "mercadolibre" in canales:
+            if sku_principal:
+                non_cafe_meli_skus.add(str(sku_principal))
+            for sku_alias in sku_aliases:
+                if sku_alias:
+                    non_cafe_meli_skus.add(str(sku_alias))
 
-    return multipliers, unit_skus, non_cafe_meli_skus
+        # Chocolate por categoría
+        categoria = item.get("categoria")
+        if isinstance(categoria, str) and _normalize_text(categoria) == "chocolate":
+            if sku_principal:
+                chocolate_skus.add(str(sku_principal))
+            for sku_alias in sku_aliases:
+                if sku_alias:
+                    chocolate_skus.add(str(sku_alias))
+
+        # Detergentes por multiplicador_unidades
+        multiplicador = item.get("multiplicador_unidades")
+        if isinstance(multiplicador, int) and multiplicador > 0:
+            tipo_detergente = _get_detergente_tipo(item)
+            if tipo_detergente == "35":
+                if sku_principal:
+                    detergente_35_multipliers[str(sku_principal)] = multiplicador
+                for sku_alias in sku_aliases:
+                    if sku_alias:
+                        detergente_35_multipliers[str(sku_alias)] = multiplicador
+            elif tipo_detergente == "60":
+                if sku_principal:
+                    detergente_60_multipliers[str(sku_principal)] = multiplicador
+                for sku_alias in sku_aliases:
+                    if sku_alias:
+                        detergente_60_multipliers[str(sku_alias)] = multiplicador
+            elif tipo_detergente == "mixto":
+                if sku_principal:
+                    detergente_mixed_skus.add(str(sku_principal))
+                for sku_alias in sku_aliases:
+                    if sku_alias:
+                        detergente_mixed_skus.add(str(sku_alias))
+
+    if not chocolate_skus:
+        chocolate_skus = set(CHOCOLATE_SKUS)
+
+    if not detergente_35_multipliers and not detergente_60_multipliers and not detergente_mixed_skus:
+        detergente_35_multipliers = dict(DETERGENTE_35_SKU_MULTIPLIERS)
+        detergente_60_multipliers = dict(DETERGENTE_60_SKU_MULTIPLIERS)
+        detergente_mixed_skus = {DETERGENTE_MIXED_SKU}
+    elif not detergente_mixed_skus:
+        detergente_mixed_skus = {DETERGENTE_MIXED_SKU}
+
+    return SkuCatalogData(
+        multipliers=multipliers,
+        unit_skus=frozenset(unit_skus),
+        non_cafe_meli_skus=frozenset(non_cafe_meli_skus),
+        chocolate_skus=frozenset(chocolate_skus),
+        detergente_35=detergente_35_multipliers,
+        detergente_60=detergente_60_multipliers,
+        detergente_mixed_skus=frozenset(detergente_mixed_skus),
+    )
 
 
 def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
@@ -154,7 +239,8 @@ def _get_courier(ciudad: str, source: str, rm_comunas: frozenset[str]) -> str:
 def _qty_chocolate(
     order: NormalizedOrder,
     sku_multipliers: dict[str, int],
-    unit_skus: set[str]
+    unit_skus: Collection[str],
+    chocolate_skus: Collection[str],
 ) -> int:
     """
     Calcula la cantidad total de unidades de chocolate.
@@ -166,7 +252,7 @@ def _qty_chocolate(
     """
     total = 0
     for item in order.items:
-        if item.sku not in CHOCOLATE_SKUS:
+        if item.sku not in chocolate_skus:
             continue
 
         # Si es un pack, usar multiplicador
@@ -184,8 +270,9 @@ def _qty_chocolate(
 def _qty_cafe(
     order: NormalizedOrder,
     sku_multipliers: dict[str, int],
-    unit_skus: set[str],
-    non_cafe_meli_skus: set[str],
+    unit_skus: Collection[str],
+    non_cafe_meli_skus: Collection[str],
+    chocolate_skus: Collection[str],
 ) -> int:
     """
     Calcula la cantidad total de unidades de café.
@@ -197,7 +284,7 @@ def _qty_cafe(
     """
     total = 0
     for item in order.items:
-        if item.sku in CHOCOLATE_SKUS:
+        if item.sku in chocolate_skus:
             continue
 
         # Mercado Libre: excluir SKUs no-café (ej. limpieza/hogar).
@@ -229,7 +316,12 @@ def _qty_by_name(order: NormalizedOrder, keyword: str) -> int:
     )
 
 
-def _qty_detergentes(order: NormalizedOrder) -> tuple[int, int]:
+def _qty_detergentes(
+    order: NormalizedOrder,
+    detergente_35_multipliers: dict[str, int],
+    detergente_60_multipliers: dict[str, int],
+    detergente_mixed_skus: Collection[str],
+) -> tuple[int, int]:
     """
     Devuelve (det60, det35) según SKUs de detergente.
 
@@ -238,9 +330,6 @@ def _qty_detergentes(order: NormalizedOrder) -> tuple[int, int]:
     - 60: 203192→1, 203194→2, 203198→3 por unidad.
     - Mixto 203197: suma 1 a det60 y 1 a det35 por unidad.
 
-    Fallback:
-    - Si no hay SKUs explícitos y existe detergente por nombre,
-      asigna todo el total detectado a Detergente 60.
     """
     det60 = 0
     det35 = 0
@@ -249,21 +338,17 @@ def _qty_detergentes(order: NormalizedOrder) -> tuple[int, int]:
         sku = item.sku
         qty = item.quantity
 
-        if sku in DETERGENTE_35_SKU_MULTIPLIERS:
-            det35 += qty * DETERGENTE_35_SKU_MULTIPLIERS[sku]
+        if sku in detergente_35_multipliers:
+            det35 += qty * detergente_35_multipliers[sku]
             continue
 
-        if sku in DETERGENTE_60_SKU_MULTIPLIERS:
-            det60 += qty * DETERGENTE_60_SKU_MULTIPLIERS[sku]
+        if sku in detergente_60_multipliers:
+            det60 += qty * detergente_60_multipliers[sku]
             continue
 
-        if sku == DETERGENTE_MIXED_SKU:
+        if sku in detergente_mixed_skus:
             det60 += qty
             det35 += qty
-
-    detergente_fallback = _qty_by_name(order, "detergente")
-    if det60 == 0 and det35 == 0 and detergente_fallback > 0:
-        det60 = int(detergente_fallback)
 
     return int(det60), int(det35)
 
@@ -279,7 +364,7 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
     Los pedidos se ordenan por fecha de impresión de etiqueta (label_printed_at).
     """
     rm_comunas = _load_rm_comunas()
-    sku_multipliers, unit_skus, non_cafe_meli_skus = _load_sku_data()
+    catalog = _load_sku_data()
     rows = []
 
     for order in orders:
@@ -299,7 +384,12 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
         elif order.completed_at:
             fecha_etiqueta_str = order.completed_at.isoformat()
 
-        det60, det35 = _qty_detergentes(order)
+        det60, det35 = _qty_detergentes(
+            order,
+            catalog.detergente_35,
+            catalog.detergente_60,
+            catalog.detergente_mixed_skus,
+        )
 
         order_number = str(order.id)
         if order.source.value == "mercadolibre":
@@ -321,8 +411,14 @@ def generate_excel(orders: List[NormalizedOrder]) -> bytes:
             "Cobertor":         _qty_by_name(order, "cobertor"),
             "Detergente 60":    det60,
             "Detergente 35":    det35,
-            "Chocolate":        _qty_chocolate(order, sku_multipliers, unit_skus),
-            "Cafe":             _qty_cafe(order, sku_multipliers, unit_skus, non_cafe_meli_skus),
+            "Chocolate":        _qty_chocolate(order, catalog.multipliers, catalog.unit_skus, catalog.chocolate_skus),
+            "Cafe":             _qty_cafe(
+                order,
+                catalog.multipliers,
+                catalog.unit_skus,
+                catalog.non_cafe_meli_skus,
+                catalog.chocolate_skus,
+            ),
             "Fecha_Etiqueta":   fecha_etiqueta_str,
         })
 

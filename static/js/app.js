@@ -10,16 +10,38 @@
 // ESTADO GLOBAL
 // ═══════════════════════════════════════════════════════════════
 
-let currentOrder    = null;
-let activeView      = 'dashboard';
-let lastScannedId   = null;
-const DEFAULT_SOURCE = 'woocommerce';
+const AppState = (() => {
+  const state = {
+    currentOrder: null,
+    activeView: 'dashboard',
+    lastScannedId: null,
+    allOrders: [],
+    currentFilter: 'all',
+    _orderCache: {},
+    appBootstrapped: false,
+  };
+  const listeners = new Set();
 
-// Estado del dashboard
-let allOrders     = [];   // Todos los pedidos recibidos de la API
-let currentFilter = 'all'; // 'all' | 'woocommerce' | 'mercadolibre' | 'preparing'
-let _orderCache   = {};    // Cache de objetos de pedido para el modal MeLi: "source:id" → order
-let appBootstrapped = false;
+  return {
+    get(key) {
+      return key ? state[key] : { ...state };
+    },
+    set(patch) {
+      if (!patch || typeof patch !== 'object') return;
+      Object.assign(state, patch);
+      listeners.forEach((listener) => listener(state, patch));
+    },
+    subscribe(listener) {
+      if (typeof listener !== 'function') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+})();
+
+window.AppState = AppState;
+
+const DEFAULT_SOURCE = 'woocommerce';
 
 
 function updateAdminNavigationVisibility() {
@@ -67,14 +89,14 @@ function showAppView() {
 }
 
 function bootstrapAuthenticatedApp() {
-  if (appBootstrapped) return;
+  if (AppState.get('appBootstrapped')) return;
 
   setFilter('all');
   loadOrders();
   loadManifestInfo();
   pingPrinter();
   setInterval(pingPrinter, 30_000);
-  appBootstrapped = true;
+  AppState.set({ appBootstrapped: true });
 }
 
 function checkAuth() {
@@ -173,39 +195,35 @@ window.handleUnauthorized = () => {
 // NAVEGACIÓN ENTRE VISTAS
 // ═══════════════════════════════════════════════════════════════
 
+const TAB_CLASSES = {
+  active:   'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900',
+  inactive: 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700',
+};
+
+const TAB_IDS = {
+  dashboard: 'tab-dashboard',
+  scanner:   'tab-scanner',
+  tools:     'tab-tools',
+  users:     'nav-users-btn',
+};
+
 /**
  * Cambia la vista activa de la aplicación
  * @param {string} view - 'dashboard', 'scanner', 'tools'
  */
 function showView(view) {
-  activeView = view;
-  document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
-  document.getElementById('view-scanner').classList.toggle('hidden', view !== 'scanner');
-  document.getElementById('view-tools').classList.toggle('hidden', view !== 'tools');
+  AppState.set({ activeView: view });
+  ['dashboard', 'scanner', 'tools'].forEach((section) => {
+    document.getElementById(`view-${section}`).classList.toggle('hidden', view !== section);
+  });
   document.getElementById('users-container').classList.toggle('hidden', view !== 'users');
 
-  document.getElementById('tab-dashboard').className =
-    view === 'dashboard'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  document.getElementById('tab-scanner').className =
-    view === 'scanner'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  document.getElementById('tab-tools').className =
-    view === 'tools'
-      ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-      : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-
-  const navUsersBtn = document.getElementById('nav-users-btn');
-  if (navUsersBtn && !navUsersBtn.classList.contains('hidden')) {
-    navUsersBtn.className =
-      view === 'users'
-        ? 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-400 text-coffee-900'
-        : 'tab-btn px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-coffee-900 text-coffee-200 hover:bg-coffee-800 border border-coffee-700';
-  }
+  Object.entries(TAB_IDS).forEach(([section, id]) => {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) {
+      el.className = section === view ? TAB_CLASSES.active : TAB_CLASSES.inactive;
+    }
+  });
 
   if (view === 'users' && typeof window.loadUsers === 'function') {
     window.loadUsers();
@@ -227,7 +245,7 @@ document.addEventListener('keydown', (e) => {
 
 // Auto-focus en scanner cuando se hace click en el fondo
 document.addEventListener('click', (e) => {
-  if (activeView === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
+  if (AppState.get('activeView') === 'scanner' && !e.target.closest('button') && !e.target.closest('input')) {
     document.getElementById('scan-input').focus();
   }
 });

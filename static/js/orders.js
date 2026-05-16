@@ -16,6 +16,9 @@ function renderOrders() {
   const count   = document.getElementById('order-count');
   const meliBar = document.getElementById('meli-bulk-bar');
 
+  const currentFilter = AppState.get('currentFilter');
+  const allOrders = AppState.get('allOrders');
+
   let filtered;
   if (currentFilter === 'mercadolibre') {
     // La pestaña MeLi muestra pedidos pendientes y listos para enviar (ready_to_ship)
@@ -74,8 +77,9 @@ function renderOrders() {
   } else {
     empty.classList.add('hidden');
     // Poblar cache de pedidos para el modal MeLi (evita pasar JSON como arg onclick)
-    _orderCache = {};
-    filtered.forEach(o => { _orderCache[`${o.source}:${o.id}`] = o; });
+    const nextCache = {};
+    filtered.forEach(o => { nextCache[`${o.source}:${o.id}`] = o; });
+    AppState.set({ _orderCache: nextCache });
     grid.innerHTML = filtered.map(o => buildOrderCard(o)).join('');
     grid.classList.remove('hidden');
   }
@@ -89,6 +93,7 @@ function renderOrders() {
  * @returns {string} HTML de la tarjeta
  */
 function buildOrderCard(order) {
+  const currentFilter = AppState.get('currentFilter');
   const src  = sourceInfo(order.source);
   const ship = order.shipping || {};
   const meta = order.platform_meta || {};

@@ -5,6 +5,7 @@ Guarda estados intermedios de pedidos para sobrevivir reinicios del servidor.
 import aiosqlite
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, TypedDict
@@ -15,6 +16,34 @@ from models.order import NormalizedOrder, OrderStatus
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(settings.DB_PATH)
+_DB_CONN: aiosqlite.Connection | None = None
+
+
+async def _ensure_db_connection() -> aiosqlite.Connection:
+    global _DB_CONN
+    if _DB_CONN is None:
+        _DB_CONN = await aiosqlite.connect(DB_PATH)
+        await _DB_CONN.execute("PRAGMA journal_mode=WAL")
+        await _DB_CONN.execute("PRAGMA synchronous=NORMAL")
+        await _DB_CONN.execute("PRAGMA busy_timeout=5000")
+        await _DB_CONN.commit()
+    return _DB_CONN
+
+
+@asynccontextmanager
+async def get_db() -> aiosqlite.Connection:
+    db = await _ensure_db_connection()
+    try:
+        yield db
+    finally:
+        pass
+
+
+async def close_db() -> None:
+    global _DB_CONN
+    if _DB_CONN is not None:
+        await _DB_CONN.close()
+        _DB_CONN = None
 
 CREATE_ORDERS_TABLE = """
 CREATE TABLE IF NOT EXISTS orders (
@@ -75,7 +104,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 async def init_db() -> None:
     """Crea las tablas si no existen y aplica migraciones pendientes."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(CREATE_ORDERS_TABLE)
         await db.execute(CREATE_EVENTS_TABLE)
         await db.execute(CREATE_MELI_TOKENS_TABLE)
@@ -142,7 +171,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
             order.completed_at = datetime.utcnow()
 
         # Auto-asignar al manifest abierto actual si no tiene uno ya asignado
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 "SELECT manifest_id FROM orders WHERE id = ? AND source = ?",
                 (order.id, order.source.value)
@@ -156,7 +185,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
     completed_at = order.completed_at.isoformat() if order.completed_at else None
     label_printed_at = order.label_printed_at.isoformat() if order.label_printed_at else None
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """
             INSERT INTO orders (id, source, status, payload_json, created_at, updated_at, completed_at, label_printed_at, manifest_id)
@@ -213,7 +242,7 @@ async def upsert_order(order: NormalizedOrder) -> None:
 
 async def get_local_status(order_id: str, source: str) -> Optional[OrderStatus]:
     """Devuelve el estado local de un pedido o None si no está en la BD."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT status FROM orders WHERE id = ? AND source = ?",
             (order_id, source),
@@ -230,7 +259,7 @@ async def get_local_status(order_id: str, source: str) -> Optional[OrderStatus]:
 async def log_event(order_id: str, source: str, event: str, detail: str = "") -> None:
     """Registra un evento de auditoría en la BD."""
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO order_events (order_id, source, event, detail, ts) VALUES (?,?,?,?,?)",
             (order_id, source, event, detail, now),
@@ -245,7 +274,7 @@ async def get_preparing_orders() -> List[NormalizedOrder]:
     permitiendo re-imprimir el PDF si la hoja se perdió en bodega.
     """
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT payload_json FROM orders "
             "WHERE status IN ('preparing', 'labeled') AND source = 'woocommerce' "
@@ -263,7 +292,7 @@ async def get_preparing_orders() -> List[NormalizedOrder]:
 async def get_completed_orders() -> List[NormalizedOrder]:
     """Devuelve todos los pedidos completados desde la BD local para reporte Excel."""
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT payload_json FROM orders WHERE status = 'completed' ORDER BY completed_at DESC"
         ) as cursor:
@@ -291,8 +320,7 @@ class PublicUserRow(TypedDict):
 
 async def get_user_by_username(username: str) -> Optional[UserRow]:
     """Busca un usuario por username."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, hashed_password, role FROM users WHERE username = ?",
             (username,),
@@ -303,17 +331,17 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
         return None
 
     return UserRow(
-        id=row["id"],
-        username=row["username"],
-        hashed_password=row["hashed_password"],
-        role=row["role"],
+        id=row[0],
+        username=row[1],
+        hashed_password=row[2],
+        role=row[3],
     )
 
 
 async def create_user(username: str, hashed_password: str, role: str = "user") -> int:
     """Crea un usuario y devuelve su ID."""
     normalized_role = role if role in {"admin", "user"} else "user"
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "INSERT INTO users (username, hashed_password, role) VALUES (?, ?, ?)",
             (username, hashed_password, normalized_role),
@@ -325,8 +353,7 @@ async def create_user(username: str, hashed_password: str, role: str = "user") -
 async def get_all_users() -> List[PublicUserRow]:
     """Lista todos los usuarios sin exponer contraseñas."""
     users: List[PublicUserRow] = []
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, role FROM users ORDER BY username ASC"
         ) as cursor:
@@ -335,9 +362,9 @@ async def get_all_users() -> List[PublicUserRow]:
     for row in rows:
         users.append(
             PublicUserRow(
-                id=row["id"],
-                username=row["username"],
-                role=row["role"],
+                id=row[0],
+                username=row[1],
+                role=row[2],
             )
         )
 
@@ -358,8 +385,7 @@ async def ensure_default_admin_user(username: str, hashed_password: str) -> None
 
 
 async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, username, role FROM users WHERE id = ?",
             (user_id,),
@@ -370,9 +396,9 @@ async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
         return None
 
     return PublicUserRow(
-        id=row["id"],
-        username=row["username"],
-        role=row["role"],
+        id=row[0],
+        username=row[1],
+        role=row[2],
     )
 
 
@@ -380,7 +406,7 @@ async def update_user_role(user_id: int, role: str) -> bool:
     if role not in {"admin", "user"}:
         return False
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "UPDATE users SET role = ? WHERE id = ?",
             (role, user_id),
@@ -390,7 +416,7 @@ async def update_user_role(user_id: int, role: str) -> bool:
 
 
 async def update_username(user_id: int, username: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "UPDATE users SET username = ? WHERE id = ?",
             (username, user_id),
@@ -400,7 +426,7 @@ async def update_username(user_id: int, username: str) -> bool:
 
 
 async def delete_user(user_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             "DELETE FROM users WHERE id = ?",
             (user_id,),
@@ -423,8 +449,7 @@ async def get_meli_token() -> Optional[MeliTokenRow]:
     Devuelve el único registro de tokens de Mercado Libre o None si aún
     no se ha completado el flujo OAuth.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
+    async with get_db() as db:
         async with db.execute(
             "SELECT access_token, refresh_token, expires_at, seller_id "
             "FROM meli_tokens WHERE id = 1"
@@ -435,10 +460,10 @@ async def get_meli_token() -> Optional[MeliTokenRow]:
         return None
 
     return MeliTokenRow(
-        access_token=row["access_token"],
-        refresh_token=row["refresh_token"],
-        expires_at=datetime.fromisoformat(row["expires_at"]),
-        seller_id=row["seller_id"] or "",
+        access_token=row[0],
+        refresh_token=row[1],
+        expires_at=datetime.fromisoformat(row[2]),
+        seller_id=row[3] or "",
     )
 
 
@@ -454,7 +479,7 @@ async def save_meli_token(
     (útil al refrescar tokens sin conocer el seller_id todavía).
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             """
             INSERT INTO meli_tokens (id, access_token, refresh_token, expires_at, seller_id, updated_at)
@@ -485,7 +510,7 @@ async def get_or_create_open_manifest() -> int:
     Si no existe ninguno, crea uno nuevo.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Intentar obtener manifest abierto
         async with db.execute(
             "SELECT id FROM manifests WHERE status = 'open' ORDER BY created_at DESC LIMIT 1"
@@ -511,7 +536,7 @@ async def close_manifest(manifest_id: int) -> bool:
     Retorna True si se cerró exitosamente, False si no existe o ya estaba cerrado.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         cursor = await db.execute(
             """
             UPDATE manifests
@@ -529,7 +554,7 @@ async def get_manifest_orders(manifest_id: int) -> List[NormalizedOrder]:
     Devuelve todos los pedidos asociados a un manifest específico.
     """
     results: List[NormalizedOrder] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """
             SELECT payload_json FROM orders
@@ -554,7 +579,7 @@ async def get_open_manifest_info() -> Optional[dict]:
     Devuelve información del manifest abierto actual o None si no existe.
     Retorna: {"id": int, "created_at": str, "order_count": int}
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             """
             SELECT m.id, m.created_at, COUNT(o.id) as order_count
@@ -584,7 +609,7 @@ async def migrate_orphan_orders() -> None:
     Crea un manifest histórico cerrado para agruparlos.
     """
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # Verificar si hay pedidos huérfanos
         async with db.execute(
             "SELECT COUNT(*) FROM orders WHERE status = 'completed' AND manifest_id IS NULL"

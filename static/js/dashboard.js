@@ -11,7 +11,7 @@
  * @param {string} filter - 'all', 'woocommerce', 'mercadolibre', 'preparing'
  */
 function setFilter(filter) {
-  currentFilter = filter;
+  AppState.set({ currentFilter: filter });
 
   // Estilos de pills: activo vs inactivo
   const pills = {
@@ -55,6 +55,7 @@ function updateBulkButton() {
   const badge      = document.getElementById('bulk-count-badge');
   const pdfBadge   = document.getElementById('bulk-pdf-count-badge');
   const selectAll  = document.getElementById('select-all-meli');
+  const currentFilter = AppState.get('currentFilter');
 
   if (currentFilter === 'mercadolibre' && checked.length > 0) {
     zplBtn.classList.remove('hidden');
@@ -115,7 +116,8 @@ function toggleAllMeli(checked) {
  * @param {string|number} id - ID del pedido
  */
 function openMeliDetailModal(source, id) {
-  const order = _orderCache[`${source}:${id}`];
+  const orderCache = AppState.get('_orderCache') || {};
+  const order = orderCache[`${source}:${id}`];
   if (!order) { toast('No se pudo cargar el detalle del pedido', 'error'); return; }
 
   const meta = order.platform_meta || {};
@@ -145,8 +147,17 @@ function openMeliDetailModal(source, id) {
   document.getElementById('modal-logistic').innerHTML      = logisticLabel;
   document.getElementById('modal-name').textContent        = name;
   document.getElementById('modal-nickname').textContent    = ship.full_address || [ship.address_1, ship.city].filter(Boolean).join(', ') || '—';
-  document.getElementById('modal-rut').textContent         = meta.rut || '—';
-  document.getElementById('modal-phone').textContent       = ship.phone || '—';
+  const shippingStatus = (meta.shipping_status || '').toLowerCase();
+  const piiBlockedStates = ['shipped', 'delivered', 'dropped_off', 'cancelled'];
+  const piiBlocked = piiBlockedStates.includes(shippingStatus);
+
+  const rutText = meta.rut || '';
+  const phoneText = ship.phone || '';
+
+  document.getElementById('modal-rut').textContent =
+    rutText || (piiBlocked ? 'No disponible (pedido ya despachado)' : 'No informado por el comprador');
+  document.getElementById('modal-phone').textContent =
+    phoneText || (piiBlocked ? 'No disponible (pedido ya despachado)' : '—');
   document.getElementById('modal-shipping-status').textContent = meta.shipping_status || '—';
 
   // Mostrar nota del cliente si existe
