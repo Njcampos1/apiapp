@@ -90,23 +90,53 @@ class _TokenData:
 
 # ── Proveedor ─────────────────────────────────────────────────────────────────
 
+def _deep_update(original: dict, update: dict) -> dict:
+    """Actualiza un diccionario de forma recursiva sin sobrescribir sub-dicts completos."""
+    for key, value in update.items():
+        if isinstance(value, dict) and key in original and isinstance(original[key], dict):
+            _deep_update(original[key], value)
+        else:
+            original[key] = value
+    return original
+
+
 def _extract_phone(receiver: dict, buyer: dict) -> str:
     """
-    Extrae teléfono priorizando receiver_address.phone y fallback a buyer.phone.
+    Extrae teléfono priorizando:
+      1. receiver_address.phone       (dict del endpoint /orders)
+      2. receiver_address.receiver_phone (string del endpoint /shipments/{id})
+      3. buyer.phone                  (fallback)
     """
     phone_str = ""
+
+    # Fuente 1: receiver_address.phone (dict con area_code + number)
     rec_phone = receiver.get("phone") or {}
     if isinstance(rec_phone, dict) and rec_phone.get("number"):
         area_code = str(rec_phone.get("area_code", "")).strip()
         num = str(rec_phone.get("number", "")).strip()
         phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+
+    # Fuente 2: receiver_address.receiver_phone (string, del endpoint /shipments/{id})
+    if not phone_str:
+        rec_phone_raw = receiver.get("receiver_phone")
+        if isinstance(rec_phone_raw, str) and rec_phone_raw.strip():
+            phone_str = rec_phone_raw.strip()
+        elif isinstance(rec_phone_raw, dict) and rec_phone_raw.get("number"):
+            area_code = str(rec_phone_raw.get("area_code", "")).strip()
+            num = str(rec_phone_raw.get("number", "")).strip()
+            phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+
+    # Fuente 3: buyer.phone
     if not phone_str:
         phone_data = buyer.get("phone") or {}
-        if isinstance(phone_data, dict):
+        if isinstance(phone_data, dict) and phone_data.get("number"):
             area_code = str(phone_data.get("area_code", "")).strip()
             num = str(phone_data.get("number", "")).strip()
             if num:
                 phone_str = f"{area_code}{num}" if area_code and not num.startswith(area_code) else num
+        elif isinstance(phone_data, str) and phone_data.strip():
+            phone_str = phone_data.strip()
+
     return phone_str
 
 
@@ -125,18 +155,36 @@ def _extract_receiver_name(receiver: dict, buyer: dict) -> tuple[str, str, str]:
 
 def _extract_rut(raw: dict, buyer: dict, receiver: dict) -> str:
     """Extrae RUT usando billing_info y fallbacks según reglas actuales."""
+    import re
+
+    rut = ""
+
+    # Fuente 1: raw.billing_info (enriquecido por /orders/{id}/billing_info)
     billing_info = raw.get("billing_info") or buyer.get("billing_info") or {}
-    rut = (billing_info.get("doc_number") or "").strip()
-    if not rut and isinstance(billing_info, list):
+    if isinstance(billing_info, dict):
+        rut = (billing_info.get("doc_number") or "").strip()
+    elif isinstance(billing_info, list):
         for entry in billing_info:
-            rut = (entry.get("doc_number") or "").strip()
-            if rut:
-                break
+            if isinstance(entry, dict):
+                rut = (entry.get("doc_number") or "").strip()
+                if rut:
+                    break
+
+    # Fuente 2: receiver_address puede traer doc_type/doc_number en algunos países
     if not rut:
         receiver_doc_type = receiver.get("receiver_id_type", "")
         receiver_doc_number = receiver.get("receiver_id_number", "")
         if receiver_doc_type and receiver_doc_number:
             rut = f"{receiver_doc_number}".strip()
+
+    # Fuente 3: buscar patrón RUT chileno dentro de additional_info del billing_info
+    if not rut:
+        additional_info = (buyer.get("billing_info") or {}).get("additional_info", "")
+        if isinstance(additional_info, str) and additional_info.strip():
+            match = re.search(r'\b(\d{1,2}(?:\.\d{3}){2}-[\dkK]|\d{7,8}-[\dkK])\b', additional_info)
+            if match:
+                rut = match.group(1)
+
     return rut
 
 
@@ -273,7 +321,7 @@ class MeliProvider(BaseOrderProvider):
             if shipping_id:
                 try:
                     shipment_data = await self._get(f"/shipments/{shipping_id}")
-                    raw["shipping"].update(shipment_data)
+                    _deep_update(raw["shipping"], shipment_data)
                 except RuntimeError as exc:
                     logger.warning(
                         "MeLi: no se pudo enriquecer /shipments/%s para pedido %s: %s",
@@ -291,6 +339,11 @@ class MeliProvider(BaseOrderProvider):
                 try:
                     billing_data = await self._get(f"/orders/{order_id}/billing_info")
                     raw["billing_info"] = billing_data.get("billing_info", billing_data)
+                    logger.debug(
+                        "MeLi: billing_info OK para pedido %s — keys=%s",
+                        order_id,
+                        list(raw["billing_info"].keys()) if isinstance(raw["billing_info"], dict) else type(raw["billing_info"]),
+                    )
                 except RuntimeError as exc:
                     # 403 es esperado si el comprador no ingresó RUT o si MeLi bloqueó PII
                     if "403" in str(exc):
@@ -417,7 +470,7 @@ class MeliProvider(BaseOrderProvider):
             if shipping_id:
                 try:
                     shipment_data = await self._get(f"/shipments/{shipping_id}")
-                    raw["shipping"].update(shipment_data)
+                    _deep_update(raw["shipping"], shipment_data)
                 except RuntimeError as exc:
                     logger.warning(
                         "MeLi: no se pudo enriquecer /shipments/%s para pedido Full %s: %s",
@@ -517,7 +570,7 @@ class MeliProvider(BaseOrderProvider):
             if shipping_id:
                 try:
                     shipment = await self._get(f"/shipments/{shipping_id}")
-                    data["shipping"].update(shipment)
+                    _deep_update(data["shipping"], shipment)
                 except RuntimeError as exc:
                     logger.warning(
                         "MeLi: no se pudo enriquecer /shipments/%s para pedido %s: %s",

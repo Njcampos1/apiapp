@@ -5,3 +5,4 @@ data/pedidos.db-wal
 pedidos.db
 __pycache__/
 *.pyc
+/tests
