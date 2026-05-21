@@ -7,32 +7,43 @@ con todos los campos requeridos según sus especificaciones.
 from __future__ import annotations
 
 import csv
+import json
 import re
 import logging
+import unicodedata
 from io import StringIO
+from pathlib import Path
 from typing import List, Tuple
 
 from models.order import NormalizedOrder
 
 logger = logging.getLogger(__name__)
 
-# Comunas de región metropolitana (normalized)
-RM_STATES = {"rm", "metropolitana", "región metropolitana", "region metropolitana"}
+_RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
 DECLARED_PRODUCT_VALUE = "50000"
 
 
-def _normalize_state(state: str) -> str:
-    """Normaliza el nombre de la región para comparación."""
-    return state.strip().lower()
+def _normalize_text(text: str) -> str:
+    """Quita diacríticos/acentos y convierte a minúsculas para comparación robusta."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
+
+def _load_rm_comunas() -> frozenset[str]:
+    """Carga y normaliza las comunas de RM desde el JSON."""
+    with open(_RM_JSON_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    return frozenset(_normalize_text(c.strip()) for c in data.get("comunas", []))
 
 
 def _is_regional_order(order: NormalizedOrder) -> bool:
     """
-    Determina si un pedido es de región (no RM).
-    Filtra pedidos con state en ["RM", "METROPOLITANA", etc.].
+    Determina si un pedido es de región (no tiene cobertura propia).
+    Filtra validando si la comuna NO está en el data/rm.json.
     """
-    state_normalized = _normalize_state(order.shipping.state)
-    return state_normalized not in RM_STATES
+    rm_comunas = _load_rm_comunas()
+    ciudad = _normalize_text(order.shipping.city.strip())
+    return ciudad not in rm_comunas
 
 
 def _is_woocommerce_regional(order: NormalizedOrder) -> bool:
