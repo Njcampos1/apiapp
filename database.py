@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS users (
     username        TEXT NOT NULL UNIQUE,
     hashed_password TEXT NOT NULL,
     role            TEXT NOT NULL DEFAULT 'user',
+    token_version   INTEGER NOT NULL DEFAULT 0,
     CHECK (role IN ('admin', 'user'))
 );
 """
@@ -150,6 +151,14 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
             await db.commit()
             logger.info("Columna role añadida a users")
+        except aiosqlite.OperationalError:
+            pass  # La columna ya existe
+
+        # Migración: añadir token_version a users si la columna aún no existe
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+            await db.commit()
+            logger.info("Columna token_version añadida a users")
         except aiosqlite.OperationalError:
             pass  # La columna ya existe
 
@@ -310,6 +319,7 @@ class UserRow(TypedDict):
     username: str
     hashed_password: str
     role: str
+    token_version: int
 
 
 class PublicUserRow(TypedDict):
@@ -322,7 +332,7 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
     """Busca un usuario por username."""
     async with get_db() as db:
         async with db.execute(
-            "SELECT id, username, hashed_password, role FROM users WHERE username = ?",
+            "SELECT id, username, hashed_password, role, token_version FROM users WHERE username = ?",
             (username,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -335,6 +345,7 @@ async def get_user_by_username(username: str) -> Optional[UserRow]:
         username=row[1],
         hashed_password=row[2],
         role=row[3],
+        token_version=row[4],
     )
 
 
@@ -400,6 +411,17 @@ async def get_user_by_id(user_id: int) -> Optional[PublicUserRow]:
         username=row[1],
         role=row[2],
     )
+
+
+async def increment_token_version(user_id: int) -> bool:
+    """Invalida todos los JWT emitidos para un usuario (logout-all / revocación)."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "UPDATE users SET token_version = token_version + 1 WHERE id = ?",
+            (user_id,),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def update_user_role(user_id: int, role: str) -> bool:

@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import shutil
+import time as _time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -69,6 +72,7 @@ from database import (
     get_open_manifest_info,
     update_username,
     update_user_role,
+    increment_token_version,
     close_db,
 )
 from models.order import NormalizedOrder, OrderStatus, OrderSource
@@ -98,6 +102,11 @@ _providers: ProviderRegistry = {}
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 JWT_ALGORITHM = "HS256"
+
+_LOGIN_ATTEMPTS: Dict[str, List[float]] = defaultdict(list)
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300
+
 SKUS_JSON_PATH = Path("data") / "skus.json"
 SKUS_AUDIT_PATH = Path("data") / "skus_audit.jsonl"
 
@@ -396,11 +405,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(username: str, role: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+def create_access_token(username: str, role: str, token_version: int) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     payload = {
         "sub": username,
         "role": role,
+        "tv": token_version,
+        "jti": secrets.token_hex(16),
+        "iat": now,
         "exp": expire,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
@@ -430,6 +443,10 @@ async def get_current_user(
 
     user = await get_user_by_username(username)
     if user is None:
+        raise unauthorized
+
+    token_version = payload.get("tv")
+    if not isinstance(token_version, int) or token_version != user["token_version"]:
         raise unauthorized
 
     return {
@@ -504,15 +521,18 @@ async def lifespan(app: FastAPI):
     global _providers
     await init_db()
 
-    if len(settings.SECRET_KEY.strip()) < 32:
+    _weak_secrets = {"change-this-in-production", "REEMPLAZAR-CON-CLAVE-ALEATORIA-DE-64-CHARS"}
+    if len(settings.SECRET_KEY.strip()) < 32 or settings.SECRET_KEY.strip() in _weak_secrets:
         raise RuntimeError(
-            "SECRET_KEY debe tener al menos 32 caracteres. "
+            "SECRET_KEY inválida: debe tener ≥32 caracteres y no ser un placeholder. "
             "Genera una con: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
 
-    if settings.DEFAULT_ADMIN_PASSWORD == "admin123":
-        logger.warning(
-            "Se está usando DEFAULT_ADMIN_PASSWORD por defecto. Cámbiala en producción."
+    _weak_passwords = {"admin123", "REEMPLAZAR-ANTES-DE-DESPLEGAR", "change-this-in-production"}
+    if settings.DEFAULT_ADMIN_PASSWORD in _weak_passwords or len(settings.DEFAULT_ADMIN_PASSWORD) < 8:
+        raise RuntimeError(
+            "DEFAULT_ADMIN_PASSWORD inseguro o por defecto. Define una contraseña "
+            "fuerte (≥8 caracteres) en .env antes de arrancar."
         )
     await ensure_default_admin_user(
         settings.DEFAULT_ADMIN_USERNAME,
@@ -556,10 +576,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Error no manejado en %s: %s", request.url, exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Error interno del servidor", "error": str(exc)},
-    )
+    content: Dict[str, Any] = {"detail": "Error interno del servidor"}
+    if settings.DEBUG:
+        content["error"] = str(exc)
+    return JSONResponse(status_code=500, content=content)
 
 
 # ── Endpoints de diagnóstico ─────────────────────────────────────
@@ -573,21 +593,39 @@ async def health():
 
 
 @app.post("/api/login", tags=["auth"])
-async def login(payload: LoginRequest):
+async def login(payload: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    now = _time.monotonic()
+    attempts = _LOGIN_ATTEMPTS[client_ip]
+    attempts[:] = [t for t in attempts if now - t < LOGIN_WINDOW_SECONDS]
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos de inicio de sesión. Espera unos minutos.",
+        )
+
     user = await get_user_by_username(payload.username)
     if not user or not verify_password(payload.password, user["hashed_password"]):
+        attempts.append(now)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
         )
 
-    access_token = create_access_token(user["username"], user["role"])
+    _LOGIN_ATTEMPTS.pop(client_ip, None)
+    access_token = create_access_token(user["username"], user["role"], user["token_version"])
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "role": user["role"],
         "is_admin": user["role"] == "admin",
     }
+
+
+@app.post("/api/logout", tags=["auth"])
+async def logout(current_user: dict[str, Any] = Depends(get_current_user)):
+    await increment_token_version(current_user["id"])
+    return {"message": "Sesión cerrada en todos los dispositivos"}
 
 
 @app.post("/api/users", tags=["users"], response_model=UserResponse)
@@ -644,6 +682,8 @@ async def update_user_role_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No se pudo actualizar el rol del usuario",
         )
+
+    await increment_token_version(user_id)
 
     refreshed_user = await get_user_by_id(user_id)
     if refreshed_user is None:
@@ -898,15 +938,13 @@ async def meli_oauth_callback(
     try:
         await meli.exchange_code(code)
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mercado Libre rechazó el código de autorización: {exc.response.text}",
-        )
+        logger.warning("MeLi rechazó el código de autorización: %s", exc.response.text)
+        raise HTTPException(status_code=400, detail="Mercado Libre rechazó el código de autorización.")
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     except Exception as exc:
         logger.exception("Error inesperado en callback de MercadoLibre")
-        raise HTTPException(status_code=500, detail=f"Error interno: {exc}")
+        raise HTTPException(status_code=500, detail="Error interno procesando el callback de Mercado Libre")
 
     return {
         "success": True,
