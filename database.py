@@ -298,6 +298,33 @@ async def get_preparing_orders() -> List[NormalizedOrder]:
     return results
 
 
+async def get_preparing_orders_all_sources() -> List[NormalizedOrder]:
+    """
+    Igual que get_preparing_orders pero SIN filtrar por proveedor: devuelve los
+    pedidos en estado PREPARING o LABELED de TODAS las fuentes (WooCommerce,
+    MercadoLibre, etc.).
+
+    Se usa SOLO en el pre-chequeo de cierre de manifiesto para detectar la
+    diferencia 'hoja de picking generada vs etiqueta impresa' también en MeLi.
+    Se mantiene separada de get_preparing_orders (WooCommerce) para no alterar
+    el filtro de recuperación del dashboard.
+    """
+    results: List[NormalizedOrder] = []
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT payload_json FROM orders "
+            "WHERE status IN ('preparing', 'labeled') "
+            "ORDER BY updated_at DESC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            results.append(NormalizedOrder.model_validate_json(row[0]))
+        except Exception as exc:
+            logger.warning("No se pudo deserializar pedido PREPARING/LABELED (all sources): %s", exc)
+    return results
+
+
 async def get_completed_orders() -> List[NormalizedOrder]:
     """Devuelve todos los pedidos completados desde la BD local para reporte Excel."""
     results: List[NormalizedOrder] = []

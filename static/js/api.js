@@ -189,6 +189,39 @@ async function exportAllOrders() {
 async function closeManifestAndDownload() {
   const btn = document.getElementById('close-manifest-btn');
   const originalHTML = btn.innerHTML;
+
+  // ── Control: avisar diferencia entre hojas de picking y etiquetas ──
+  // Antes de cerrar el día, detectamos pedidos con hoja generada (preparing/
+  // labeled) pero SIN etiqueta impresa: NO entran al manifiesto. Si los hay,
+  // mostramos un aviso con la lista y dejamos decidir al operario (no bloquea).
+  try {
+    const pre = await fetch('/api/manifests/preflight');
+    if (pre.ok) {
+      const data = await pre.json();
+      if (data.count > 0) {
+        const lista = data.orders
+          .map(o => `  • #${o.display_id} — ${o.customer}`)
+          .join('\n');
+        const seguir = window.confirm(
+          `⚠ Atención antes de cerrar el día\n\n` +
+          `Hay ${data.count} pedido(s) con hoja de picking generada pero SIN ` +
+          `etiqueta impresa.\nEstos NO entrarán en el manifiesto:\n\n` +
+          `${lista}\n\n` +
+          `¿Deseas cerrar el día de todas formas?`
+        );
+        if (!seguir) {
+          toast('Cierre cancelado. Revisa los pedidos pendientes de etiqueta.', 'info');
+          return;
+        }
+      }
+    } else {
+      console.warn('Preflight de manifest no disponible, se continúa con el cierre');
+    }
+  } catch (err) {
+    // No bloquear el cierre si el pre-chequeo falla (red/servidor).
+    console.warn('Error en preflight de manifest, se continúa con el cierre:', err);
+  }
+
   btn.disabled = true;
   btn.innerHTML = `<svg class="spinner w-4 h-4" fill="none" viewBox="0 0 24 24">
     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

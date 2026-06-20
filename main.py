@@ -65,6 +65,7 @@ from database import (
     get_local_status,
     get_completed_orders,
     get_preparing_orders,
+    get_preparing_orders_all_sources,
     save_meli_token,
     get_or_create_open_manifest,
     close_manifest,
@@ -968,6 +969,34 @@ async def spa(request: Request):
     )
 
 
+def reconcile_local_status(
+    platform_status: OrderStatus,
+    local_status: OrderStatus | None,
+) -> OrderStatus:
+    """
+    Decide el estado final de un pedido al sincronizarlo con la plataforma.
+
+    Regla (preserva el comportamiento actual):
+    - Sin estado local → se usa el de la plataforma.
+    - Con estado local → se PRESERVA el local (p.ej. 'completed' en verde tras
+      refrescar, hasta que la plataforma confirme el cambio).
+    - EXCEPCIÓN: si el pedido está localmente en 'preparing'/'labeled' pero la
+      plataforma ya reporta un estado TERMINAL real ('completed'/'error', por
+      shipping_status), gana la plataforma. Así un pedido cuya hoja se marcó
+      pero cuyo envío ya se despachó/canceló no queda "atrapado" en preparing.
+
+    Nota: con los datos actuales (MeLi solo llega a local None/completed/error)
+    esta función es equivalente a la lógica previa; la excepción solo aplica al
+    nuevo caso 'preparing'/'labeled' en MeLi.
+    """
+    if not local_status:
+        return platform_status
+    if local_status in (OrderStatus.PREPARING, OrderStatus.LABELED) and \
+            platform_status in (OrderStatus.COMPLETED, OrderStatus.ERROR):
+        return platform_status
+    return local_status
+
+
 # ── Pedidos — Lectura ────────────────────────────────────────────
 @app.get("/api/orders", tags=["orders"])
 async def list_orders(_current_user: dict[str, Any] = Depends(get_current_user)):
@@ -1000,9 +1029,10 @@ async def list_orders(_current_user: dict[str, Any] = Depends(get_current_user))
 
                 # Para Mercado Libre: preservar estado local si existe
                 # Esto permite mostrar pedidos completados localmente en verde
-                # hasta que MeLi confirme el cambio de estado en su API
-                if local_status:
-                    o.status = local_status
+                # hasta que MeLi confirme el cambio de estado en su API.
+                # La excepción (estado terminal de plataforma sobre un 'preparing'
+                # local) evita atrapar pedidos ya despachados/cancelados.
+                o.status = reconcile_local_status(o.status, local_status)
 
                 await upsert_order(o)
                 # Enriquecer con información de desglose de Packs
@@ -1260,6 +1290,49 @@ async def get_current_manifest(_current_user: dict[str, Any] = Depends(get_curre
     }
 
 
+def build_preflight_payload(orders: list[NormalizedOrder]) -> dict[str, Any]:
+    """
+    Serializa la diferencia 'hojas de picking vs etiquetas' para el aviso de
+    pre-cierre. Recibe los pedidos con hoja generada pero sin etiqueta impresa
+    (estado 'preparing'/'labeled') y devuelve un resumen liviano para la UI.
+
+    Función pura (sin I/O) para poder testearla de forma aislada.
+    """
+    rows = [
+        {
+            "id": o.id,
+            "display_id": o.display_id,
+            "customer": o.shipping.full_name or "—",
+            "status": o.status.value,
+            "item_count": o.item_count,
+        }
+        for o in orders
+    ]
+    return {
+        "count": len(rows),
+        "orders": rows,
+    }
+
+
+@app.get("/api/manifests/preflight", tags=["manifests"])
+async def manifest_preflight(_current_user: dict[str, Any] = Depends(get_current_user)):
+    """
+    Pre-chequeo antes de cerrar el día: detecta la diferencia entre
+    'hojas de picking' y 'etiquetas'.
+
+    Devuelve los pedidos que tienen hoja de picking generada (estado
+    'preparing' o 'labeled') pero cuya etiqueta NUNCA se imprimió, por lo
+    que NO están 'completed' y NO entrarán en el manifiesto del día.
+
+    Es de SOLO LECTURA: no modifica estados ni bloquea el cierre. El frontend
+    lo usa para mostrar un aviso al operario antes de cerrar el manifiesto.
+
+    Retorna: {"count": int, "orders": [{id, display_id, customer, status, item_count}]}
+    """
+    pendientes = await get_preparing_orders_all_sources()
+    return build_preflight_payload(pendientes)
+
+
 # ── Mercado Libre — Descarga masiva ZPL nativo ───────────────────
 @app.get("/api/orders/meli/bulk-zpl", tags=["meli"])
 async def bulk_meli_zpl(
@@ -1498,6 +1571,28 @@ async def bulk_meli_pdf(
         raise HTTPException(
             status_code=500,
             detail=f"Error generando PDF masivo: {exc}"
+        )
+
+    # Marcar los pedidos incluidos como PREPARING (hoja de picking generada),
+    # de forma simétrica a export-all en WooCommerce. Así el pre-chequeo de
+    # cierre de manifiesto detecta también en MeLi la diferencia
+    # 'hoja generada sin etiqueta'. Guards para NO alterar el flujo:
+    #   · no marcar si el envío ya está despachado/cancelado en MeLi, y
+    #   · no degradar un pedido ya etiquetado/completado localmente.
+    _dispatched = ("shipped", "delivered", "dropped_off", "cancelled")
+    for order in orders:
+        shipping_status = (order.platform_meta or {}).get("shipping_status", "")
+        if shipping_status in _dispatched:
+            continue
+        local_status = await get_local_status(order.id, order.source.value)
+        if local_status in (OrderStatus.COMPLETED, OrderStatus.LABELED):
+            continue
+        order.status = OrderStatus.PREPARING
+        await upsert_order(order)
+        await log_event(
+            order.id, order.source.value,
+            "bulk_export",
+            f"Marcado PREPARING en descarga masiva de picking MeLi ({len(orders)} en lote)",
         )
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
