@@ -24,6 +24,7 @@ Rutas:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -66,6 +67,9 @@ from database import (
     get_completed_orders,
     get_preparing_orders,
     get_preparing_orders_all_sources,
+    get_stuck_meli_for_reconcile,
+    create_reconciliation_manifest,
+    reconcile_terminal_order,
     save_meli_token,
     get_or_create_open_manifest,
     close_manifest,
@@ -567,6 +571,19 @@ async def lifespan(app: FastAPI):
 
     _providers = build_providers()
     logger.info("App iniciada con %d proveedor(es)", len(_providers))
+
+    # Reaper en segundo plano: limpia al arrancar los pedidos MeLi atascados en
+    # preparing/labeled (despachados pero colgados localmente), sin bloquear el
+    # arranque. Idempotente: si no hay nada que reconciliar, es un no-op.
+    async def _startup_reap() -> None:
+        try:
+            result = await reconcile_stuck_meli_orders()
+            if result.get("reconciled"):
+                logger.info("Reaper MeLi (arranque): %s", result)
+        except Exception as exc:
+            logger.warning("Reaper MeLi (arranque) falló: %s", exc)
+
+    asyncio.create_task(_startup_reap())
     yield
     # Cierre limpio de clientes HTTP
     for p in _providers.values():
@@ -1321,22 +1338,107 @@ def build_preflight_payload(orders: list[NormalizedOrder]) -> dict[str, Any]:
     pre-cierre. Recibe los pedidos con hoja generada pero sin etiqueta impresa
     (estado 'preparing'/'labeled') y devuelve un resumen liviano para la UI.
 
+    Deduplica por envío (source + display_id): en MeLi varios pedidos de un
+    mismo carrito comparten número de envío y una sola etiqueta, así que no
+    deben listarse repetidos.
+
     Función pura (sin I/O) para poder testearla de forma aislada.
     """
-    rows = [
-        {
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for o in orders:
+        key = (o.source.value, o.display_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
             "id": o.id,
             "display_id": o.display_id,
             "customer": o.shipping.full_name or "—",
             "status": o.status.value,
             "item_count": o.item_count,
-        }
-        for o in orders
-    ]
+        })
     return {
         "count": len(rows),
         "orders": rows,
     }
+
+
+# Antigüedad (en días) tras la cual un pedido MeLi atascado en preparing/labeled
+# se considera despachado aunque MeLi no lo confirme: un pedido MeLi no permanece
+# días en preparación, así que evita que un zombie ancestral quede para siempre.
+_MELI_REAP_GRACE_DAYS = 3
+
+
+async def reconcile_stuck_meli_orders() -> dict[str, int]:
+    """
+    Reaper: reconcilia pedidos de MeLi atascados localmente en PREPARING/LABELED
+    contra su estado REAL en MeLi. Los que ya están despachados/cancelados pasan
+    a COMPLETED/ERROR y se archivan en un manifiesto de reconciliación cerrado,
+    de modo que dejan de aparecer en el aviso de pre-cierre y no contaminan el
+    manifiesto activo.
+
+    Causa de raíz: cuando un envío MeLi sale del feed 'paid & not_delivered',
+    /api/orders ya no lo ve y nunca reconcilia su estado local. Este reaper cierra
+    esa brecha. Es idempotente y resiliente: errores individuales no abortan el
+    lote, y los pedidos recientes que MeLi no resuelve se dejan intactos.
+    """
+    provider = _providers.get(OrderSource.MERCADOLIBRE.value)
+    if provider is None:
+        return {"checked": 0, "reconciled": 0}
+
+    try:
+        stuck = await get_stuck_meli_for_reconcile()
+    except Exception as exc:
+        logger.warning("Reaper MeLi: no se pudieron leer pedidos atascados: %s", exc)
+        return {"checked": 0, "reconciled": 0}
+
+    if not stuck:
+        return {"checked": 0, "reconciled": 0}
+
+    cutoff = datetime.utcnow() - timedelta(days=_MELI_REAP_GRACE_DAYS)
+
+    async def _resolve(order: NormalizedOrder, updated_at: str):
+        new_status = await provider.get_current_status(order.id)
+        if new_status is None:
+            # Salvaguarda anti-zombie: si MeLi no lo resuelve pero lleva días
+            # atascado, asumir despachado.
+            try:
+                if datetime.fromisoformat(updated_at.replace("Z", "")) < cutoff:
+                    new_status = OrderStatus.COMPLETED
+            except (ValueError, AttributeError):
+                pass
+        return order, new_status
+
+    results = await asyncio.gather(
+        *[_resolve(o, upd) for o, upd in stuck], return_exceptions=True
+    )
+
+    pending_updates = [
+        (o, st) for r in results
+        if not isinstance(r, Exception)
+        for (o, st) in [r]
+        if st is not None and st != o.status
+    ]
+
+    if not pending_updates:
+        return {"checked": len(stuck), "reconciled": 0}
+
+    manifest_id = await create_reconciliation_manifest()
+    reconciled = 0
+    for order, new_status in pending_updates:
+        order.status = new_status
+        try:
+            await reconcile_terminal_order(order, manifest_id)
+            reconciled += 1
+        except Exception as exc:
+            logger.warning("Reaper MeLi: no se pudo reconciliar %s: %s", order.id, exc)
+
+    logger.info(
+        "Reaper MeLi: %d/%d pedidos reconciliados a estado terminal (manifiesto #%d)",
+        reconciled, len(stuck), manifest_id,
+    )
+    return {"checked": len(stuck), "reconciled": reconciled}
 
 
 @app.get("/api/manifests/preflight", tags=["manifests"])
@@ -1354,6 +1456,13 @@ async def manifest_preflight(_current_user: dict[str, Any] = Depends(get_current
 
     Retorna: {"count": int, "orders": [{id, display_id, customer, status, item_count}]}
     """
+    # Reconciliar primero los pedidos MeLi atascados (despachados pero colgados
+    # en preparing/labeled), para que el aviso refleje solo lo realmente pendiente.
+    try:
+        await reconcile_stuck_meli_orders()
+    except Exception as exc:
+        logger.warning("Preflight: el reaper de MeLi falló (se continúa): %s", exc)
+
     pendientes = await get_preparing_orders_all_sources()
     return build_preflight_payload(pendientes)
 

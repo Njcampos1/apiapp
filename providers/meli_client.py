@@ -386,6 +386,49 @@ class MeliProvider(BaseOrderProvider):
         logger.debug("MeLi: %d pedidos obtenidos", len(normalized))
         return normalized
 
+    async def get_current_status(self, order_id: str) -> Optional[OrderStatus]:
+        """
+        Consulta el estado REAL y actual de un pedido en MeLi, aunque ya haya
+        salido del feed de pendientes (despachado/entregado/cancelado).
+
+        Se usa para reconciliar pedidos atascados localmente en PREPARING/LABELED:
+        una vez que el envío deja de ser 'paid & not_delivered' ya no aparece en
+        get_pending_orders, por lo que la reconciliación normal de /api/orders no
+        los ve y nunca pasan a COMPLETED.
+
+        Devuelve:
+        - OrderStatus.COMPLETED  si el envío está shipped/delivered/dropped_off.
+        - OrderStatus.ERROR      si el envío o el pedido está cancelado.
+        - None                   si sigue pendiente o no se pudo determinar
+                                 (en ese caso NO se debe tocar el estado local).
+        """
+        try:
+            order_raw = await self._get(f"/orders/{order_id}")
+        except Exception as exc:
+            logger.warning("MeLi reaper: no se pudo consultar /orders/%s: %s", order_id, exc)
+            return None
+
+        shipping_id = (order_raw.get("shipping") or {}).get("id")
+        shipping_status = ""
+        if shipping_id:
+            try:
+                shipment = await self._get(f"/shipments/{shipping_id}")
+                shipping_status = (shipment.get("status") or "").lower()
+            except Exception as exc:
+                logger.warning("MeLi reaper: no se pudo consultar /shipments/%s: %s", shipping_id, exc)
+
+        if shipping_status in ("shipped", "delivered", "dropped_off"):
+            return OrderStatus.COMPLETED
+        if shipping_status == "cancelled":
+            return OrderStatus.ERROR
+
+        # Cancelaciones a nivel de pedido que no pasan por el envío.
+        order_status = (order_raw.get("status") or "").lower()
+        if _MELI_STATUS_MAP.get(order_status) == OrderStatus.ERROR:
+            return OrderStatus.ERROR
+
+        return None
+
     async def get_full_orders(self) -> List[NormalizedOrder]:
         """
         Devuelve pedidos Full (fulfillment) de los últimos 30 días, solo con

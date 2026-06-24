@@ -652,6 +652,85 @@ async def get_open_manifest_info() -> Optional[dict]:
     }
 
 
+async def get_stuck_meli_for_reconcile() -> List[tuple[NormalizedOrder, str]]:
+    """
+    Devuelve los pedidos de MeLi atascados en PREPARING/LABELED junto con su
+    'updated_at' (ISO) para que el reaper pueda aplicar una salvaguarda por
+    antigüedad. El estado real lo decide MeLi; updated_at es solo el respaldo.
+    """
+    out: List[tuple[NormalizedOrder, str]] = []
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT payload_json, updated_at FROM orders "
+            "WHERE source = 'mercadolibre' AND status IN ('preparing', 'labeled')"
+        ) as cursor:
+            rows = await cursor.fetchall()
+    for payload, updated_at in rows:
+        try:
+            out.append((NormalizedOrder.model_validate_json(payload), updated_at))
+        except Exception as exc:
+            logger.warning("Reaper MeLi: payload inválido, se omite: %s", exc)
+    return out
+
+
+async def create_reconciliation_manifest() -> int:
+    """
+    Crea un manifiesto CERRADO donde archivar pedidos reconciliados
+    retroactivamente (zombies), para que NO contaminen el manifiesto activo
+    del día. Devuelve su id. Sigue el mismo patrón que migrate_orphan_orders.
+    """
+    now = datetime.utcnow().isoformat()
+    async with get_db() as db:
+        cursor = await db.execute(
+            "INSERT INTO manifests (status, created_at, closed_at) VALUES ('closed', ?, ?)",
+            (now, now),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def reconcile_terminal_order(order: NormalizedOrder, reconciliation_manifest_id: int) -> None:
+    """
+    Marca un pedido (con order.status ya resuelto a un estado terminal) como
+    reconciliado: actualiza estado y payload, conserva su fecha original en
+    completed_at y, si quedó COMPLETED, lo asigna al manifiesto de reconciliación
+    CERRADO. NO usa upsert_order para evitar que caiga en el manifiesto abierto.
+    """
+    now = datetime.utcnow().isoformat()
+    status_value = order.status.value
+    async with get_db() as db:
+        await db.execute(
+            """
+            UPDATE orders SET
+                status       = ?,
+                payload_json = ?,
+                updated_at   = ?,
+                completed_at = CASE
+                                   WHEN ? = 'completed'
+                                   THEN COALESCE(completed_at, updated_at)
+                                   ELSE completed_at
+                               END,
+                manifest_id  = CASE
+                                   WHEN ? = 'completed' AND manifest_id IS NULL
+                                   THEN ?
+                                   ELSE manifest_id
+                               END
+            WHERE id = ? AND source = ?
+            """,
+            (
+                status_value,
+                order.model_dump_json(),
+                now,
+                status_value,
+                status_value,
+                reconciliation_manifest_id,
+                order.id,
+                order.source.value,
+            ),
+        )
+        await db.commit()
+
+
 async def migrate_orphan_orders() -> None:
     """
     Asigna un manifest retroactivo a pedidos completados que no tienen manifest_id.
