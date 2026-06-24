@@ -21,6 +21,7 @@ from typing import Collection, List
 
 import pandas as pd
 
+from config import settings
 from models.order import NormalizedOrder
 
 # ── Constantes ────────────────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ CHOCOLATE_SKUS: frozenset[str] = frozenset({
 })
 
 _RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
-_SKU_JSON_PATH = Path(__file__).parent.parent / "data" / "skus.json"
+_SKU_JSON_PATH = Path(settings.SKUS_PATH)
 
 DETERGENTE_35_SKU_MULTIPLIERS: dict[str, int] = {
     "203193": 1,

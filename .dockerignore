@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────────
+# .dockerignore — evita hornear datos vivos / secretos en la imagen.
+#
+# Sin este archivo, `COPY . .` incrustaba el .env (con DB_PATH conflictivo),
+# bases de datos viejas y backups dentro de la imagen, lo que causaba
+# pérdidas de datos y ambigüedad de configuración al hacer rebuild.
+# ─────────────────────────────────────────────────────────────────
+
+# Secretos y entorno (se inyectan vía variables de entorno, no en la imagen)
+.env
+.env.*
+!.env.example
+
+# Datos vivos: todo lo de data/ EXCEPTO los catálogos semilla versionados.
+data/*
+!data/skus.json
+!data/rm.json
+
+# Bases de datos sueltas
+*.db
+*.db-shm
+*.db-wal
+pedidos.db
+
+# Carpetas de recuperación / respaldos manuales
+recuperado/
+recuperado_*/
+
+# Artefactos de desarrollo
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+tests/
+*.md

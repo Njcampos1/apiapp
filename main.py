@@ -108,8 +108,32 @@ _LOGIN_ATTEMPTS: Dict[str, List[float]] = defaultdict(list)
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 300
 
-SKUS_JSON_PATH = Path("data") / "skus.json"
-SKUS_AUDIT_PATH = Path("data") / "skus_audit.jsonl"
+# Catálogo vivo (editable vía PUT /api/skus). En producción apunta al volumen
+# persistente (/data/skus.json); la auditoría y los backups viven junto a él.
+SKUS_JSON_PATH = Path(settings.SKUS_PATH)
+SKUS_AUDIT_PATH = SKUS_JSON_PATH.with_name("skus_audit.jsonl")
+
+# Catálogo "semilla" horneado en la imagen (versionado en el repo). Se usa para
+# poblar el volumen la primera vez que arranca, si aún no existe el catálogo vivo.
+_SEED_SKUS_PATH = Path(__file__).resolve().parent / "data" / "skus.json"
+
+
+def seed_skus_if_missing() -> None:
+    """Copia el catálogo semilla al volumen persistente si todavía no existe.
+
+    Evita pisar ediciones del cliente: solo actúa cuando el archivo vivo falta.
+    """
+    if SKUS_JSON_PATH.exists():
+        return
+    if not _SEED_SKUS_PATH.exists():
+        logger.warning("No hay catálogo semilla en %s; se omite el seed", _SEED_SKUS_PATH)
+        return
+    try:
+        SKUS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_SEED_SKUS_PATH, SKUS_JSON_PATH)
+        logger.info("Catálogo de SKUs inicializado en %s desde semilla", SKUS_JSON_PATH)
+    except OSError as exc:
+        logger.error("No se pudo inicializar el catálogo de SKUs: %s", exc)
 
 
 class LoginRequest(BaseModel):
@@ -521,6 +545,7 @@ def get_provider(source: str) -> BaseOrderProvider:
 async def lifespan(app: FastAPI):
     global _providers
     await init_db()
+    seed_skus_if_missing()
 
     _weak_secrets = {"change-this-in-production", "REEMPLAZAR-CON-CLAVE-ALEATORIA-DE-64-CHARS"}
     if len(settings.SECRET_KEY.strip()) < 32 or settings.SECRET_KEY.strip() in _weak_secrets:

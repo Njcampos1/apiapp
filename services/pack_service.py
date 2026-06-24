@@ -11,9 +11,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from config import settings
 from models.order import NormalizedOrder, OrderItem, OrderSource, PackItem
 
-_SKU_JSON_PATH = Path(__file__).parent.parent / "data" / "skus.json"
+_SKU_JSON_PATH = Path(settings.SKUS_PATH)
 
 
 @lru_cache(maxsize=1)

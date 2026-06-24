@@ -31,11 +31,18 @@ services:
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
       - DEBUG=${DEBUG:-false}
+      # Datos vivos dentro del volumen persistente (/data). NO usar rutas
+      # relativas: deben ser absolutas para caer dentro del volumen montado.
       - DB_PATH=/data/pedidos.db
+      - SKUS_PATH=/data/skus.json
 
     volumes:
-      # Persistencia de la base de datos fuera del contenedor
-      - ./data:/data
+      # Persistencia fuera del contenedor Y fuera del árbol de Git.
+      # DATA_DIR debe apuntar a un directorio externo al repositorio
+      # (p.ej. /home/azureuser/appdata) para que cambiar de rama o hacer
+      # rebuild nunca toque la base de datos ni el catálogo del cliente.
+      # En desarrollo local, sin DATA_DIR, cae en ./data por defecto.
+      - ${DATA_DIR:-./data}:/data
 
     # Con network_mode: host no se definen ports (el contenedor usa
     # directamente el puerto 8000 del host)

@@ -3,6 +3,12 @@ data/pedidos.db
 data/pedidos.db-shm
 data/pedidos.db-wal
 pedidos.db
+# Auditoría y respaldos del catálogo generados en runtime (no versionar;
+# data/skus.json sí se versiona, es la semilla)
+data/skus_audit.jsonl
+data/skus.backup.*.json
+recuperado/
+recuperado_*/
 __pycache__/
 *.pyc
 .venv/

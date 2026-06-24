@@ -3,7 +3,13 @@ Configuración centralizada vía variables de entorno.
 Usa python-dotenv para cargar el archivo .env en desarrollo local.
 """
 from functools import lru_cache
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Directorio del repositorio (donde vive este archivo). Sirve para construir
+# rutas por defecto robustas frente al working directory desde el que se ejecute.
+_BASE_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -29,6 +35,10 @@ class Settings(BaseSettings):
     APP_PORT:   int = 8000
     DEBUG:      bool = False
     DB_PATH:    str = "pedidos.db"
+    # Catálogo de packs/SKUs editable en runtime (PUT /api/skus).
+    # En producción debe apuntar al volumen persistente, p.ej. /data/skus.json.
+    # El default apunta al catálogo "semilla" versionado en el repo.
+    SKUS_PATH:  str = str(_BASE_DIR / "data" / "skus.json")
     SECRET_KEY: str
     JWT_EXPIRE_MINUTES: int = 720
     DEFAULT_ADMIN_USERNAME: str = "admin"
