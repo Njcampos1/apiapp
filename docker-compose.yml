@@ -20,8 +20,16 @@ services:
 
     restart: unless-stopped
 
+    # Carga TODO el .env del host en el entorno del contenedor en runtime.
+    # Imprescindible desde que .dockerignore dejó de hornear el .env en la
+    # imagen: así llegan SECRET_KEY, DEFAULT_ADMIN_PASSWORD y demás secretos
+    # sin quedar incrustados en la imagen.
+    env_file:
+      - .env
+
+    # Overrides explícitos (tienen prioridad sobre env_file). Sirven para
+    # forzar rutas absolutas dentro del volumen, pase lo que pase en el .env.
     environment:
-      # Las variables se leen del archivo .env en el mismo directorio
       - WOO_URL=${WOO_URL}
       - WOO_KEY=${WOO_KEY}
       - WOO_SECRET=${WOO_SECRET}
