@@ -325,6 +325,79 @@ async def get_preparing_orders_all_sources() -> List[NormalizedOrder]:
     return results
 
 
+async def get_completed_shipping_ids_meli(shipping_ids: set[str]) -> set[str]:
+    """
+    De un conjunto de shipping_ids de MeLi, devuelve los que YA tienen al menos
+    un pedido en estado 'completed' en la BD local (es decir, cuya etiqueta física
+    del envío ya se imprimió).
+
+    Motivo: en MeLi un *pack* de varios pedidos comparte UN solo envío y por tanto
+    UNA sola etiqueta. Cada pedido lleva su propia hoja de picking (y su propio
+    'preparing'), pero la etiqueta se descarga por 'shipping_id'. Si un pedido
+    hermano del mismo envío ya está 'completed', la etiqueta ya salió y los demás
+    pedidos de ese pack NO deben avisarse como "sin etiqueta impresa".
+
+    Se consulta acotado a los shipping_ids indicados (los de los pedidos que aún
+    están pendientes), así el costo es mínimo. Se castea a TEXT en ambos lados
+    porque el shipping_id puede venir como número o cadena dentro del payload.
+    """
+    ids = [str(s) for s in shipping_ids if s]
+    if not ids:
+        return set()
+
+    placeholders = ",".join("?" for _ in ids)
+    query = (
+        "SELECT DISTINCT CAST(json_extract(payload_json, '$.platform_meta.shipping_id') AS TEXT) "
+        "FROM orders "
+        "WHERE source = 'mercadolibre' AND status = 'completed' "
+        f"AND CAST(json_extract(payload_json, '$.platform_meta.shipping_id') AS TEXT) IN ({placeholders})"
+    )
+    result: set[str] = set()
+    async with get_db() as db:
+        async with db.execute(query, ids) as cursor:
+            rows = await cursor.fetchall()
+    for row in rows:
+        if row[0] is not None:
+            result.add(str(row[0]))
+    return result
+
+
+async def get_meli_pack_siblings_pending(
+    shipping_id: str, exclude_order_id: str
+) -> List[NormalizedOrder]:
+    """
+    Devuelve los pedidos MeLi locales que comparten `shipping_id` con otro pedido
+    y siguen en 'preparing'/'labeled' (excluyendo `exclude_order_id`).
+
+    Son los "hermanos" de un mismo pack: en MeLi varios pedidos comparten UN envío
+    y por tanto UNA sola etiqueta física. Cuando esa etiqueta se imprime para uno
+    de ellos, el resto también queda despachado; el llamador los marca COMPLETED.
+
+    Se castea a TEXT en ambos lados porque el shipping_id puede venir como número o
+    cadena dentro del payload.
+    """
+    results: List[NormalizedOrder] = []
+    sid = str(shipping_id) if shipping_id else ""
+    if not sid:
+        return results
+
+    query = (
+        "SELECT payload_json FROM orders "
+        "WHERE source = 'mercadolibre' AND status IN ('preparing', 'labeled') "
+        "AND CAST(json_extract(payload_json, '$.platform_meta.shipping_id') AS TEXT) = ? "
+        "AND id != ?"
+    )
+    async with get_db() as db:
+        async with db.execute(query, (sid, str(exclude_order_id))) as cursor:
+            rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            results.append(NormalizedOrder.model_validate_json(row[0]))
+        except Exception as exc:
+            logger.warning("No se pudo deserializar pedido hermano de pack MeLi: %s", exc)
+    return results
+
+
 async def get_completed_orders() -> List[NormalizedOrder]:
     """Devuelve todos los pedidos completados desde la BD local para reporte Excel."""
     results: List[NormalizedOrder] = []

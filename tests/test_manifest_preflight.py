@@ -126,6 +126,74 @@ class TestPreflightContent:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 2b. Exclusión de packs MeLi cuya etiqueta ya se imprimió (envío hermano completed)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPreflightPackYaEtiquetado:
+    """
+    En MeLi un pack de varios pedidos comparte UN envío y UNA sola etiqueta. Si un
+    pedido hermano del mismo envío ya está 'completed', la etiqueta física ya salió;
+    el resto del pack NO debe avisarse como "sin etiqueta impresa".
+
+    `printed_shipments` = {(source, display_id)} de envíos cuya etiqueta ya se
+    imprimió (calculado por el endpoint a partir de la BD).
+    """
+
+    def _pack_order(self, order_id: str, shipping_id: str = "47566519382"):
+        return _make_order(
+            order_id=order_id,
+            source="mercadolibre",
+            first_name="Juan Joel",
+            last_name="Zapata",
+            platform_meta={"shipping_id": shipping_id},
+        )
+
+    def test_sin_printed_shipments_no_cambia_nada(self):
+        # Contrato previo intacto: si no se pasa el set, se comporta como antes.
+        order = self._pack_order("2000003456")
+        payload = build_preflight_payload([order])
+        assert payload["count"] == 1
+
+    def test_envio_con_hermano_completed_no_avisa(self):
+        # El otro pedido del pack (mismo shipping_id) ya está completed → su
+        # etiqueta ya salió → NO debe aparecer en el aviso.
+        pendiente = self._pack_order("2000003456", shipping_id="47566519382")
+        printed = {("mercadolibre", "47566519382")}
+        payload = build_preflight_payload([pendiente], printed_shipments=printed)
+        assert payload == {"count": 0, "orders": []}
+
+    def test_pack_con_dos_pendientes_ambos_excluidos(self):
+        # Dos pedidos del mismo envío, ambos aún en preparing, pero la etiqueta del
+        # envío ya se imprimió (un tercer hermano completed): ninguno debe avisar.
+        p1 = self._pack_order("2000003456", shipping_id="47566519382")
+        p2 = self._pack_order("2000003457", shipping_id="47566519382")
+        printed = {("mercadolibre", "47566519382")}
+        payload = build_preflight_payload([p1, p2], printed_shipments=printed)
+        assert payload["count"] == 0
+
+    def test_otro_envio_sin_etiqueta_si_avisa(self):
+        # Un pack ya etiquetado se excluye, pero otro envío realmente pendiente
+        # (sin hermano completed) sigue apareciendo.
+        etiquetado = self._pack_order("2000003456", shipping_id="47566519382")
+        pendiente_real = self._pack_order("2000009999", shipping_id="99999999999")
+        printed = {("mercadolibre", "47566519382")}
+        payload = build_preflight_payload(
+            [etiquetado, pendiente_real], printed_shipments=printed
+        )
+        assert payload["count"] == 1
+        assert payload["orders"][0]["display_id"] == "99999999999"
+
+    def test_printed_no_afecta_otra_fuente_con_mismo_numero(self):
+        # La clave incluye la fuente: un display_id igual en WooCommerce no se ve
+        # afectado por un envío MeLi etiquetado con ese mismo número.
+        woo = _make_order(order_id="47566519382", source="woocommerce")
+        printed = {("mercadolibre", "47566519382")}
+        payload = build_preflight_payload([woo], printed_shipments=printed)
+        assert payload["count"] == 1
+        assert payload["orders"][0]["display_id"] == "47566519382"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 3. reconcile_local_status — regla de sincronización (seguridad del flujo MeLi)
 # ══════════════════════════════════════════════════════════════════════════════
 

@@ -67,6 +67,8 @@ from database import (
     get_completed_orders,
     get_preparing_orders,
     get_preparing_orders_all_sources,
+    get_completed_shipping_ids_meli,
+    get_meli_pack_siblings_pending,
     get_stuck_meli_for_reconcile,
     create_reconciliation_manifest,
     reconcile_terminal_order,
@@ -1332,7 +1334,10 @@ async def get_current_manifest(_current_user: dict[str, Any] = Depends(get_curre
     }
 
 
-def build_preflight_payload(orders: list[NormalizedOrder]) -> dict[str, Any]:
+def build_preflight_payload(
+    orders: list[NormalizedOrder],
+    printed_shipments: set[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
     """
     Serializa la diferencia 'hojas de picking vs etiquetas' para el aviso de
     pre-cierre. Recibe los pedidos con hoja generada pero sin etiqueta impresa
@@ -1342,13 +1347,20 @@ def build_preflight_payload(orders: list[NormalizedOrder]) -> dict[str, Any]:
     mismo carrito comparten número de envío y una sola etiqueta, así que no
     deben listarse repetidos.
 
+    `printed_shipments` es un conjunto de claves (source, display_id) cuya
+    etiqueta física YA se imprimió (p. ej. un pack de MeLi donde un pedido
+    hermano del mismo envío ya quedó 'completed'). Esas claves se excluyen del
+    aviso: un solo envío = una sola etiqueta, así que el resto del pack no está
+    realmente "sin etiqueta impresa".
+
     Función pura (sin I/O) para poder testearla de forma aislada.
     """
+    printed = printed_shipments or set()
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for o in orders:
         key = (o.source.value, o.display_id)
-        if key in seen:
+        if key in seen or key in printed:
             continue
         seen.add(key)
         rows.append({
@@ -1464,7 +1476,25 @@ async def manifest_preflight(_current_user: dict[str, Any] = Depends(get_current
         logger.warning("Preflight: el reaper de MeLi falló (se continúa): %s", exc)
 
     pendientes = await get_preparing_orders_all_sources()
-    return build_preflight_payload(pendientes)
+
+    # En MeLi un pack de varios pedidos comparte UN envío y UNA sola etiqueta.
+    # Si un pedido hermano del mismo envío ya está 'completed', la etiqueta física
+    # ya salió: no debemos avisar de los demás pedidos del pack como "sin etiqueta
+    # impresa". Averiguamos qué shipping_ids pendientes ya tienen un hermano
+    # completado y los excluimos del aviso.
+    meli_shipping_ids = {
+        o.display_id
+        for o in pendientes
+        if o.source == OrderSource.MERCADOLIBRE and o.display_id
+    }
+    printed_shipments: set[tuple[str, str]] = set()
+    if meli_shipping_ids:
+        completadas = await get_completed_shipping_ids_meli(meli_shipping_ids)
+        printed_shipments = {
+            (OrderSource.MERCADOLIBRE.value, sid) for sid in completadas
+        }
+
+    return build_preflight_payload(pendientes, printed_shipments=printed_shipments)
 
 
 # ── Mercado Libre — Descarga masiva ZPL nativo ───────────────────
@@ -1533,6 +1563,27 @@ async def bulk_meli_zpl(
                     order.label_printed_at = datetime.utcnow()
                 order.status = OrderStatus.COMPLETED
                 await upsert_order(order)
+
+                # Propagar al resto del pack: en MeLi varios pedidos comparten UN
+                # envío y UNA sola etiqueta física. Al imprimirla, los pedidos
+                # hermanos del mismo shipping_id también quedan despachados, así
+                # que se marcan COMPLETED de una vez. Esto permite cerrar el
+                # manifiesto imprimiendo una sola etiqueta por pack.
+                ship_id = order.platform_meta.get("shipping_id")
+                if ship_id:
+                    printed_at = order.label_printed_at or datetime.utcnow()
+                    siblings = await get_meli_pack_siblings_pending(str(ship_id), order_id)
+                    for sib in siblings:
+                        sib.label_printed_at = sib.label_printed_at or printed_at
+                        sib.status = OrderStatus.COMPLETED
+                        await upsert_order(sib)
+                        await log_event(
+                            sib.id,
+                            OrderSource.MERCADOLIBRE.value,
+                            "pack_sibling_completed",
+                            f"Completado junto al envío {ship_id} "
+                            f"(etiqueta impresa vía pedido {order_id})",
+                        )
 
             await log_event(
                 order_id,

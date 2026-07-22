@@ -38,6 +38,7 @@ import database
 from database import (
     upsert_order, get_local_status, get_preparing_orders,
     get_preparing_orders_all_sources, get_open_manifest_info, close_manifest,
+    get_completed_shipping_ids_meli, get_meli_pack_siblings_pending,
 )
 from models.order import (
     NormalizedOrder, OrderItem, OrderSource, OrderStatus, ShippingAddress,
@@ -76,6 +77,7 @@ def _make_order(
     status: OrderStatus = OrderStatus.PROCESSING,
     completed_at=None,
     label_printed_at=None,
+    platform_meta=None,
 ) -> NormalizedOrder:
     return NormalizedOrder(
         id=order_id,
@@ -86,6 +88,7 @@ def _make_order(
         total=1000,
         completed_at=completed_at,
         label_printed_at=label_printed_at,
+        platform_meta=(platform_meta or {}),
     )
 
 
@@ -280,4 +283,97 @@ class TestPreflightAllSources:
             ids = {o.id for o in await get_preparing_orders_all_sources()}
             assert "P1" not in ids
             assert "C1" not in ids
+        _run(body)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. Packs MeLi: un envío = una etiqueta. Detección de hermanos por shipping_id.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _meli_pack_order(order_id: str, shipping_id, status: OrderStatus) -> NormalizedOrder:
+    return _make_order(
+        order_id=order_id,
+        source="mercadolibre",
+        status=status,
+        platform_meta={"shipping_id": shipping_id},
+    )
+
+
+class TestPackSiblingsCompletedShippingIds:
+    """
+    get_completed_shipping_ids_meli: de un conjunto de envíos, devuelve los que ya
+    tienen un pedido 'completed' (etiqueta ya impresa). Alimenta la exclusión del
+    aviso de pre-cierre.
+    """
+
+    def test_detecta_envio_con_hermano_completed_shipping_id_entero(self):
+        async def body():
+            # shipping_id entero, como lo entrega MeLi en el payload
+            await upsert_order(_meli_pack_order("A", 47566519382, OrderStatus.COMPLETED))
+            await upsert_order(_meli_pack_order("B", 47566519382, OrderStatus.PREPARING))
+            await upsert_order(_meli_pack_order("C", 99999999999, OrderStatus.PREPARING))
+            res = await get_completed_shipping_ids_meli({"47566519382", "99999999999"})
+            assert res == {"47566519382"}
+        _run(body)
+
+    def test_conjunto_vacio_devuelve_vacio(self):
+        async def body():
+            assert await get_completed_shipping_ids_meli(set()) == set()
+        _run(body)
+
+
+class TestPackSiblingsPending:
+    """
+    get_meli_pack_siblings_pending: hermanos del mismo envío aún en preparing/
+    labeled (excluyendo el pedido cuya etiqueta se acaba de imprimir).
+    """
+
+    def test_devuelve_hermanos_pendientes_del_mismo_envio(self):
+        async def body():
+            await upsert_order(_meli_pack_order("A", 47566519382, OrderStatus.COMPLETED))
+            await upsert_order(_meli_pack_order("B", 47566519382, OrderStatus.PREPARING))
+            await upsert_order(_meli_pack_order("C", 47566519382, OrderStatus.LABELED))
+            sibs = await get_meli_pack_siblings_pending("47566519382", exclude_order_id="A")
+            assert {o.id for o in sibs} == {"B", "C"}
+        _run(body)
+
+    def test_excluye_al_pedido_actual_y_a_otros_envios(self):
+        async def body():
+            await upsert_order(_meli_pack_order("A", 47566519382, OrderStatus.PREPARING))
+            await upsert_order(_meli_pack_order("X", 88888888888, OrderStatus.PREPARING))
+            sibs = await get_meli_pack_siblings_pending("47566519382", exclude_order_id="A")
+            assert sibs == []
+        _run(body)
+
+    def test_no_incluye_hermanos_ya_completed(self):
+        async def body():
+            await upsert_order(_meli_pack_order("A", 47566519382, OrderStatus.COMPLETED))
+            await upsert_order(_meli_pack_order("B", 47566519382, OrderStatus.COMPLETED))
+            sibs = await get_meli_pack_siblings_pending("47566519382", exclude_order_id="A")
+            assert sibs == []
+        _run(body)
+
+    def test_completar_hermano_lo_asigna_al_manifiesto(self):
+        """
+        Simula la propagación de bulk-zpl: al imprimir la etiqueta de 'A', se marca
+        COMPLETED el hermano 'B'. Debe entrar al manifiesto abierto junto con 'A'.
+        """
+        async def body():
+            await upsert_order(_meli_pack_order("A", 47566519382, OrderStatus.PREPARING))
+            await upsert_order(_meli_pack_order("B", 47566519382, OrderStatus.PREPARING))
+
+            # 'A' obtiene su etiqueta → COMPLETED
+            a = _meli_pack_order("A", 47566519382, OrderStatus.COMPLETED)
+            await upsert_order(a)
+
+            # Propagación a hermanos pendientes del mismo envío
+            for sib in await get_meli_pack_siblings_pending("47566519382", "A"):
+                sib.status = OrderStatus.COMPLETED
+                await upsert_order(sib)
+
+            rb = await _row("B", "mercadolibre")
+            assert rb["status"] == "completed"
+            assert rb["manifest_id"] is not None
+            info = await get_open_manifest_info()
+            assert info["order_count"] == 2  # A y B, un solo envío pero dos pedidos
         _run(body)
