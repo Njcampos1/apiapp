@@ -26,13 +26,25 @@ from models.order import (
     NormalizedOrder, OrderItem, OrderSource, OrderStatus, ShippingAddress,
 )
 from services import zpl_service
-from services.zpl_service import ROLE_BACKUP, ROLE_PRIMARY, ZPLService
+from services.zpl_service import (
+    ROLE_BACKUP, ROLE_PRIMARY, ZPLService, parse_host_status,
+)
 
 PRIMARY = ("100.76.207.59", 9100)
 BACKUP  = ("100.76.207.59", 9101)
 
 
 # ── Dobles de socket ─────────────────────────────────────────────
+
+# Respuesta real de una Zebra sana, capturada del equipo de bodega.
+STATUS_OK = (
+    b"\x02030,0,0,1200,000,0,0,0,000,0,0,0\x03\r\n"
+    b"\x02001,0,0,0,1,2,6,0,00000000,1,000\x03\r\n"
+    b"\x020000,0\x03\r\n"
+)
+STATUS_SIN_PAPEL = STATUS_OK.replace(b"030,0,0", b"030,1,0", 1)
+STATUS_CABEZAL_ABIERTO = STATUS_OK.replace(b"001,0,0,0", b"001,0,1,0", 1)
+
 
 class FakeWriter:
     """Writer asíncrono que acumula lo escrito en el destino que lo creó."""
@@ -48,7 +60,9 @@ class FakeWriter:
     async def drain(self) -> None:
         if self._fail_on_drain:
             raise ConnectionResetError("conexión reiniciada por la Zebra")
-        self._sink.append(self._buffer)
+        # El handshake ~HS no cuenta como etiqueta ZPL enviada.
+        if self._buffer and self._buffer != b"~HS":
+            self._sink.append(self._buffer)
         self._buffer = b""
 
     def close(self) -> None:
@@ -56,6 +70,26 @@ class FakeWriter:
 
     async def wait_closed(self) -> None:
         pass
+
+
+class FakeReader:
+    """
+    Reader que responde al handshake ~HS.
+
+    `status=None` simula el escenario real que rompió el failover en bodega: el
+    portproxy acepta la conexión pero la Zebra está muerta y nunca contesta.
+    """
+
+    def __init__(self, status: Optional[bytes]) -> None:
+        self._status = status
+
+    async def read(self, n: int = -1) -> bytes:
+        if self._status is None:
+            # Nadie contesta: el envío debe morir por timeout, no colgarse.
+            await asyncio.sleep(3600)
+        if self._status == b"":
+            return b""      # Proxy que cierra sin datos.
+        return self._status
 
 
 class FakeNetwork:
@@ -71,9 +105,12 @@ class FakeNetwork:
         self,
         failures: Optional[Dict[Tuple[str, int], BaseException]] = None,
         drain_failures: Optional[set] = None,
+        status: Optional[Dict[Tuple[str, int], Optional[bytes]]] = None,
     ) -> None:
         self.failures = failures or {}
         self.drain_failures = drain_failures or set()
+        # Por defecto todos los destinos responden como Zebra sana.
+        self.status = status or {}
         self.attempts: List[Tuple[str, int]] = []
         self.received: Dict[Tuple[str, int], List[bytes]] = {}
 
@@ -83,7 +120,8 @@ class FakeNetwork:
         if target in self.failures:
             raise self.failures[target]
         sink = self.received.setdefault(target, [])
-        return None, FakeWriter(sink, fail_on_drain=target in self.drain_failures)
+        reader = FakeReader(self.status.get(target, STATUS_OK))
+        return reader, FakeWriter(sink, fail_on_drain=target in self.drain_failures)
 
     def payloads(self, target: Tuple[str, int]) -> List[str]:
         return [b.decode("utf-8") for b in self.received.get(target, [])]
@@ -103,12 +141,14 @@ def net(monkeypatch):
     return configure
 
 
-def make_service(backup: bool = True) -> ZPLService:
+def make_service(backup: bool = True, timeout: float = 0.05) -> ZPLService:
+    # Timeout diminuto: los escenarios "nadie contesta" esperan ese plazo y no
+    # tiene sentido pagar los 3 s reales en cada test.
     return ZPLService(
         host=PRIMARY[0], port=PRIMARY[1], dpi=203,
         backup_host=BACKUP[0] if backup else "",
         backup_port=BACKUP[1],
-        timeout=3.0,
+        timeout=timeout,
     )
 
 
@@ -175,6 +215,92 @@ def test_falla_durante_el_envio_tambien_cae_al_respaldo(net):
     assert ok
     assert fake.attempts == [PRIMARY, BACKUP]
     assert svc.last_target.role == ROLE_BACKUP
+
+
+# ── El fallo real de bodega: el portproxy enmascara la Zebra ─────
+
+def test_proxy_acepta_pero_la_zebra_no_responde(net):
+    """
+    Incidencia del 2026-08-07: se desconectó la Zebra principal y la etiqueta
+    NO salió por la de respaldo. El portproxy del PC puente aceptaba la
+    conexión TCP en nombre de la impresora muerta, el envío "tenía éxito" y el
+    failover nunca se disparaba.
+
+    Con el handshake ~HS la conexión ya no basta: sin respuesta de la Zebra,
+    el destino se descarta.
+    """
+    fake = net(status={PRIMARY: None})   # acepta el socket, jamás contesta
+    svc = make_service()
+    zpl = "^XA^FDetiqueta^FS^XZ"
+
+    ok, msg = asyncio.run(svc.send_raw_zpl(zpl))
+
+    assert ok and msg == ""
+    assert fake.attempts == [PRIMARY, BACKUP]
+    assert svc.last_target.role == ROLE_BACKUP
+    assert fake.payloads(BACKUP) == [zpl]
+    assert fake.payloads(PRIMARY) == [], "nada debe darse por impreso en la muerta"
+
+
+def test_proxy_cierra_sin_responder(net):
+    """Variante: el proxy acepta y cierra de inmediato, sin datos."""
+    fake = net(status={PRIMARY: b""})
+    svc = make_service()
+
+    ok, _ = asyncio.run(svc.send_raw_zpl("^XA^XZ"))
+
+    assert ok
+    assert fake.attempts == [PRIMARY, BACKUP]
+    assert svc.last_target.role == ROLE_BACKUP
+
+
+def test_el_handshake_no_contamina_la_etiqueta(net):
+    """El `~HS` no debe acabar mezclado con el ZPL que recibe la Zebra."""
+    fake = net()
+    svc = make_service()
+    zpl = "^XA^FDlimpio^FS^XZ"
+
+    asyncio.run(svc.send_raw_zpl(zpl))
+
+    assert fake.payloads(PRIMARY) == [zpl]
+
+
+# ── Zebra viva pero incapaz de imprimir ──────────────────────────
+
+@pytest.mark.parametrize("status,motivo", [
+    (STATUS_SIN_PAPEL, "sin papel"),
+    (STATUS_CABEZAL_ABIERTO, "cabezal abierto"),
+])
+def test_zebra_que_no_puede_imprimir_cae_al_respaldo(net, status, motivo):
+    fake = net(status={PRIMARY: status})
+    svc = make_service()
+
+    ok, _ = asyncio.run(svc.send_raw_zpl("^XA^XZ"))
+
+    assert ok
+    assert svc.last_target.role == ROLE_BACKUP
+    assert fake.payloads(PRIMARY) == []
+
+
+def test_estado_sano_no_dispara_failover(net):
+    fake = net()
+    svc = make_service()
+
+    ok, _ = asyncio.run(svc.send_raw_zpl("^XA^XZ"))
+
+    assert ok
+    assert fake.attempts == [PRIMARY]
+    assert svc.last_target.role == ROLE_PRIMARY
+
+
+def test_parse_host_status():
+    """Respuesta real de la Zebra de bodega: sana."""
+    assert parse_host_status(STATUS_OK) is None
+    assert parse_host_status(STATUS_SIN_PAPEL) == "sin papel"
+    assert parse_host_status(STATUS_CABEZAL_ABIERTO) == "cabezal abierto"
+    # Respuesta truncada o de un modelo distinto: no inventar fallos.
+    assert parse_host_status(b"\x02030,0,0\x03\r\n") is None
+    assert parse_host_status(b"basura") is None
 
 
 # ── Ambas caídas ─────────────────────────────────────────────────

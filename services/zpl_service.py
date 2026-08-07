@@ -18,6 +18,13 @@ respaldo. El reintento es seguro porque la Zebra no imprime un formato hasta
 recibir `^XZ`: un envío cortado a media transmisión queda descartado en su
 buffer y no produce una etiqueta ZPL duplicada ni a medias.
 
+Detección de Zebra caída: NO basta con que la conexión TCP se establezca. En
+bodega las Zebras se alcanzan a través de un portproxy en el PC puente, y ese
+proxy acepta el socket aunque la impresora esté apagada o desconectada — la
+etiqueta ZPL se perdería en silencio y el failover nunca se dispararía. Por eso
+cada intento arranca con un handshake `~HS` (Host Status) y exige respuesta de
+la impresora; de paso detecta "sin papel" y "cabezal abierto".
+
 Manejo de errores:
   - Timeout de conexión: ZEBRA_TIMEOUT (3 s por defecto), por intento
   - Timeout de envío:    10 segundos, por intento
@@ -271,6 +278,14 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 203) -> str:
 ROLE_PRIMARY = "principal"
 ROLE_BACKUP  = "respaldo"
 
+# Comando ZPL de estado (Host Status). La Zebra responde tres líneas
+# delimitadas por STX/ETX. Es la única forma de distinguir una Zebra viva de un
+# portproxy que acepta la conexión en su nombre: el proxy acepta el socket
+# aunque la impresora esté apagada, pero no puede fabricar esta respuesta.
+_STATUS_CMD = b"~HS"
+_STX = "\x02"
+_ETX = "\x03"
+
 # Nombre legible por rol. Se separa del valor de `role` porque ese viaja en el
 # JSON de la API y debe permanecer estable; esto es sólo texto para el operador.
 _ROLE_LABELS = {
@@ -296,6 +311,37 @@ class PrinterTarget(NamedTuple):
 
     def as_dict(self) -> Dict[str, Any]:
         return {"host": self.host, "port": self.port, "role": self.role}
+
+
+def parse_host_status(raw: bytes) -> Optional[str]:
+    """
+    Interpreta la respuesta de `~HS`. Devuelve None si la Zebra puede imprimir,
+    o el motivo por el que no puede.
+
+    Formato (ZPL II), tres líneas `STX ... ETX CR LF`:
+      línea 1: aaa,b,c,dddd,...   b = sin papel, c = en pausa
+      línea 2: mmm,n,o,p,...      o = cabezal abierto
+
+    Sólo se miran "sin papel" y "cabezal abierto": son condiciones inequívocas
+    de que la etiqueta ZPL no se va a imprimir. La pausa se ignora a propósito
+    (es una acción deliberada del operador y el trabajo sale al reanudar), y el
+    fin de ribbon también, porque sólo aplica a transferencia térmica y daría
+    falsos positivos en impresión térmica directa.
+    """
+    text = raw.decode("ascii", errors="ignore")
+    fields = [
+        chunk.lstrip("\r\n").lstrip(_STX).split(",")
+        for chunk in text.split(_ETX)
+        if chunk.strip("\r\n" + _STX)
+    ]
+    if len(fields) < 2:
+        return None   # Respuesta incompleta: hay Zebra viva, no inventamos fallos.
+
+    if len(fields[0]) > 1 and fields[0][1] == "1":
+        return "sin papel"
+    if len(fields[1]) > 2 and fields[1][2] == "1":
+        return "cabezal abierto"
+    return None
 
 
 class ZPLService:
@@ -421,10 +467,38 @@ class ZPLService:
 
         return False, msg
 
+    async def _handshake(self, reader, writer) -> Tuple[bool, str]:
+        """
+        Confirma que al otro lado hay una Zebra viva y capaz de imprimir.
+
+        Aceptar la conexión TCP no basta: el portproxy del PC puente de bodega
+        acepta el socket aunque la impresora esté apagada o desconectada, y la
+        etiqueta ZPL se perdería en silencio. Por eso se pregunta el estado con
+        `~HS` y se exige respuesta: el proxy no puede fabricarla.
+        """
+        try:
+            writer.write(_STATUS_CMD)
+            await asyncio.wait_for(writer.drain(), timeout=self.timeout)
+            raw = await asyncio.wait_for(reader.read(1024), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            return False, "no respondió al estado (~HS): la Zebra no está operativa"
+        except OSError as exc:
+            return False, f"error al consultar el estado (~HS) — {exc}"
+
+        if not raw:
+            # Conexión cerrada sin datos: típico de un proxy cuyo destino
+            # (la Zebra) no está disponible.
+            return False, "cerró la conexión sin responder al estado (~HS)"
+
+        problem = parse_host_status(raw)
+        if problem:
+            return False, f"no puede imprimir ({problem})"
+        return True, ""
+
     async def _send_to(self, target: PrinterTarget, zpl: str) -> Tuple[bool, str]:
         """Abre conexión TCP contra una Zebra concreta, envía el ZPL y cierra."""
         try:
-            _, writer = await asyncio.wait_for(
+            reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(target.host, target.port),
                 timeout=self.timeout,
             )
@@ -434,6 +508,10 @@ class ZPLService:
             return False, f"no se pudo conectar — {exc}"
 
         try:
+            alive, problem = await self._handshake(reader, writer)
+            if not alive:
+                return False, problem
+
             data = zpl.encode("utf-8")
             writer.write(data)
             await asyncio.wait_for(writer.drain(), timeout=10.0)
@@ -453,19 +531,34 @@ class ZPLService:
                 pass
 
     async def _probe(self, target: PrinterTarget) -> Tuple[bool, str]:
-        """Comprueba conectividad con una Zebra sin enviar datos reales."""
+        """
+        Comprueba que una Zebra está operativa, sin imprimir nada.
+
+        Usa el mismo handshake `~HS` que el envío real: si sólo comprobara la
+        conexión TCP, el diagnóstico daría verde con la impresora apagada
+        detrás del portproxy.
+        """
         try:
-            _, writer = await asyncio.wait_for(
+            reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(target.host, target.port),
                 timeout=self.timeout,
             )
-            writer.close()
-            await writer.wait_closed()
-            return True, f"{target.label} alcanzable"
         except asyncio.TimeoutError:
             return False, f"{target.label} no responde (timeout)"
         except OSError as exc:
             return False, f"{target.label} rechazó la conexión — {exc}"
+
+        try:
+            alive, problem = await self._handshake(reader, writer)
+            if alive:
+                return True, f"{target.label} operativa"
+            return False, f"{target.label} {problem}"
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
     async def test_targets(self) -> List[Dict[str, Any]]:
         """Estado de conectividad de cada Zebra configurada, en orden."""
