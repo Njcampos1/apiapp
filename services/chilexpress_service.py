@@ -20,7 +20,7 @@ from models.order import NormalizedOrder
 logger = logging.getLogger(__name__)
 
 _RM_JSON_PATH = Path(__file__).parent.parent / "data" / "rm.json"
-DECLARED_PRODUCT_VALUE = "50000"
+DECLARED_PRODUCT_VALUE = "50000"  # Fallback cuando el pedido no trae montos por línea
 
 
 def _normalize_text(text: str) -> str:
@@ -116,6 +116,20 @@ def _normalize_phone(phone: str) -> str:
     return digits
 
 
+def _declared_value(order: NormalizedOrder) -> str:
+    """
+    Valor declarado del envío: subtotal de productos (sin costo de despacho).
+
+    Se calcula sobre las líneas del pedido en vez de `order.total` porque ese
+    campo incluye el envío. Si el pedido no trae montos usables, se cae al
+    valor por defecto para no exportar un 0.
+    """
+    subtotal = sum(item.price * item.quantity for item in order.items)
+    if subtotal <= 0:
+        return DECLARED_PRODUCT_VALUE
+    return str(int(round(subtotal)))
+
+
 def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
     """
     Genera un archivo CSV para carga masiva en Chilexpress.
@@ -205,7 +219,7 @@ def generate_chilexpress_csv(orders: List[NormalizedOrder]) -> bytes:
             "LARGO": "40",
             "CARGOEMPRESA": "",
             "MONTO_COBRO_COD": "",
-            "VALOR_DECLARADO_PRODUCTO": DECLARED_PRODUCT_VALUE,
+            "VALOR_DECLARADO_PRODUCTO": _declared_value(order),
             "EMAIL": order.shipping.email,
             "CELULAR": phone,
             "TIPO_DE_DIRECCION": "2",

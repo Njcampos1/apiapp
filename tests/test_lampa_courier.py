@@ -306,6 +306,31 @@ class TestLampaEnChilexpressCSV:
         row = next(reader)
         assert row["PRODUCTO"] == "3"
         assert row["SERVICIO"] == "3"
+
+    def test_csv_valor_declarado_es_subtotal_productos(self):
+        order = _make_order(
+            "Lampa",
+            source="woocommerce",
+            total=27990,  # incluye despacho, no debe usarse
+            items=[
+                OrderItem(sku="101000-1", name="Cafe Premium", quantity=2, price=9990),
+                OrderItem(sku="101000-2", name="Cafe Suave", quantity=1, price=4500),
+            ],
+        )
+        csv_bytes = generate_chilexpress_csv([order])
+        reader = csv.DictReader(StringIO(csv_bytes.decode("utf-8-sig")))
+        row = next(reader)
+        assert row["VALOR_DECLARADO_PRODUCTO"] == "24480"
+
+    def test_csv_valor_declarado_sin_montos_usa_fallback(self):
+        order = _make_order(
+            "Lampa",
+            source="woocommerce",
+            items=[OrderItem(sku="101000-1", name="Cafe Premium", quantity=1, price=0)],
+        )
+        csv_bytes = generate_chilexpress_csv([order])
+        reader = csv.DictReader(StringIO(csv_bytes.decode("utf-8-sig")))
+        row = next(reader)
         assert row["VALOR_DECLARADO_PRODUCTO"] == "50000"
 
     def test_csv_lampa_destinatario_correcto(self):
