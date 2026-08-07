@@ -89,7 +89,9 @@ from providers.meli_client import MeliProvider
 from services.pdf_service import generate_picking_pdf, generate_bulk_picking_pdf
 from services import excel_service
 from services.excel_service import generate_excel
-from services.zpl_service import ZPLService, build_zpl_main, build_zpl_note
+from services.zpl_service import (
+    ROLE_BACKUP, ZPLService, build_zpl_main, build_zpl_note,
+)
 from services.pack_service import enrich_order_with_pack_info, enrich_orders_with_pack_info
 from services import pack_service
 from services.chilexpress_service import generate_chilexpress_csv
@@ -627,6 +629,23 @@ async def generic_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content=content)
 
 
+# ── Impresión Zebra ──────────────────────────────────────────────
+def build_zpl_service() -> ZPLService:
+    """
+    Fuente única del cableado de configuración de las Zebras. La usan tanto
+    /api/printer/test como /api/orders/{id}/label, para que el failover se
+    configure en un solo lugar.
+    """
+    return ZPLService(
+        host=settings.ZEBRA_IP,
+        port=settings.ZEBRA_PORT,
+        dpi=settings.ZEBRA_DPI,
+        backup_host=settings.ZEBRA_BACKUP_IP,
+        backup_port=settings.ZEBRA_BACKUP_PORT,
+        timeout=settings.ZEBRA_TIMEOUT,
+    )
+
+
 # ── Endpoints de diagnóstico ─────────────────────────────────────
 @app.get("/api/health", tags=["infra"])
 async def health():
@@ -634,6 +653,10 @@ async def health():
         "status": "ok",
         "providers": list(_providers.keys()),
         "printer": f"{settings.ZEBRA_IP}:{settings.ZEBRA_PORT}",
+        "printer_backup": (
+            f"{settings.ZEBRA_BACKUP_IP}:{settings.ZEBRA_BACKUP_PORT}"
+            if settings.has_zebra_backup else None
+        ),
     }
 
 
@@ -939,13 +962,24 @@ async def update_skus(
 
 @app.get("/api/printer/test", tags=["infra"])
 async def printer_test(_current_user: dict[str, Any] = Depends(get_current_user)):
-    zpl_svc = ZPLService(
-        host=settings.ZEBRA_IP,
-        port=settings.ZEBRA_PORT,
-        dpi=settings.ZEBRA_DPI,
-    )
-    ok, msg = await zpl_svc.test_connection()
-    return {"reachable": ok, "message": msg}
+    zpl_svc = build_zpl_service()
+    targets = await zpl_svc.test_targets()
+
+    active = next((t for t in targets if t["reachable"]), None)
+    ok = active is not None
+    msg = active["message"] if active else " | ".join(t["message"] for t in targets)
+
+    return {
+        # Claves históricas: el frontend (static/js/api.js) sólo lee estas dos.
+        "reachable": ok,
+        "message":   msg,
+        # Detalle nuevo: qué Zebra respondió y estado de cada una.
+        "active_printer": (
+            {k: active[k] for k in ("host", "port", "role")} if active else None
+        ),
+        "failover": bool(active and active["role"] == ROLE_BACKUP),
+        "targets":  targets,
+    }
 
 
 # ── Mercado Libre — OAuth ─────────────────────────────────────────
@@ -2084,11 +2118,7 @@ async def print_label(
         raise HTTPException(status_code=404, detail=f"Pedido {order_id} no encontrado")
 
     # Intentar imprimir
-    zpl_svc = ZPLService(
-        host=settings.ZEBRA_IP,
-        port=settings.ZEBRA_PORT,
-        dpi=settings.ZEBRA_DPI,
-    )
+    zpl_svc = build_zpl_service()
 
     if source == OrderSource.MERCADOLIBRE.value:
         meli: MeliProvider = provider  # type: ignore[assignment]
@@ -2114,7 +2144,7 @@ async def print_label(
                 },
             )
 
-        print_ok, print_msg = await zpl_svc._send(native_zpl)
+        print_ok, print_msg = await zpl_svc.send_raw_zpl(native_zpl)
     else:
         print_ok, print_msg = await zpl_svc.print_label(order)
 
@@ -2125,12 +2155,18 @@ async def print_label(
             detail={
                 "message": "No se pudo imprimir la etiqueta",
                 "reason":  print_msg,
-                "printer": f"{settings.ZEBRA_IP}:{settings.ZEBRA_PORT}",
+                # Todos los destinos intentados: con failover activo el
+                # operador debe ver que se agotaron ambas Zebras.
+                "printer": " / ".join(t.label for t in zpl_svc.targets),
             },
         )
 
     # Impresión exitosa → completar
-    await log_event(order_id, source, "label_printed", f"Zebra {settings.ZEBRA_IP}")
+    printed_by = zpl_svc.last_target
+    await log_event(
+        order_id, source, "label_printed",
+        printed_by.label if printed_by else f"Zebra {settings.ZEBRA_IP}",
+    )
 
     # Registrar timestamp exacto de impresión y marcar como completado
     # Solo asignar label_printed_at si es la primera vez (no está en BD como completado)
@@ -2157,6 +2193,10 @@ async def print_label(
         "remote_synced": complete_ok,
         "order_id":      order_id,
         "source":        source,
+        # Qué Zebra imprimió realmente la etiqueta ZPL.
+        "printer":       printed_by.address if printed_by else None,
+        "printer_role":  printed_by.role if printed_by else None,
+        "failover":      zpl_svc.used_failover,
     }
 
 

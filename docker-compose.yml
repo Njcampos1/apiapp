@@ -36,6 +36,14 @@ services:
       - ZEBRA_IP=${ZEBRA_IP:-192.168.1.100}
       - ZEBRA_PORT=${ZEBRA_PORT:-9100}
       - ZEBRA_DPI=${ZEBRA_DPI:-300}
+      # Zebra de respaldo (failover). Vacío = failover deshabilitado.
+      # OJO: `environment` gana sobre `env_file`. Ambos leen el mismo .env del
+      # directorio del proyecto, así que la interpolación resuelve al mismo
+      # valor. Si algún día env_file apunta a OTRO archivo, estas líneas lo
+      # pisarían con vacío y apagarían el failover en silencio.
+      - ZEBRA_BACKUP_IP=${ZEBRA_BACKUP_IP:-}
+      - ZEBRA_BACKUP_PORT=${ZEBRA_BACKUP_PORT:-9101}
+      - ZEBRA_TIMEOUT=${ZEBRA_TIMEOUT:-3}
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
       - DEBUG=${DEBUG:-false}

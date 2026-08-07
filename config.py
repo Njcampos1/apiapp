@@ -30,6 +30,20 @@ class Settings(BaseSettings):
     ZEBRA_PORT: int = 9100
     ZEBRA_DPI:  int = 300   # 203 o 300
 
+    # Zebra de respaldo (failover de impresión). Si ZEBRA_BACKUP_IP queda
+    # vacío el failover está deshabilitado y el comportamiento es idéntico
+    # al de una sola Zebra: un único intento contra ZEBRA_IP:ZEBRA_PORT.
+    ZEBRA_BACKUP_IP:   str = ""
+    ZEBRA_BACKUP_PORT: int = 9101
+    # Timeout de conexión por intento, en segundos. Con failover activo el
+    # peor caso es el doble (un intento por Zebra).
+    ZEBRA_TIMEOUT: float = 3.0
+
+    @property
+    def has_zebra_backup(self) -> bool:
+        """True si hay una Zebra de respaldo configurada."""
+        return bool(self.ZEBRA_BACKUP_IP.strip())
+
     # ── Aplicación ────────────────────────────────────────────────
     APP_HOST:   str = "0.0.0.0"
     APP_PORT:   int = 8000

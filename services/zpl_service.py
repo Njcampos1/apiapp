@@ -12,16 +12,22 @@ Protocolo de impresión: ZPL II enviado directamente al puerto 9100
 de la impresora Zebra mediante socket TCP sin estado persistente,
 equivalente al comportamiento de una app de escritorio.
 
+Failover: si hay una Zebra de respaldo configurada (ZEBRA_BACKUP_IP), todo
+envío intenta primero la Zebra principal y, si falla, reintenta contra la de
+respaldo. El reintento es seguro porque la Zebra no imprime un formato hasta
+recibir `^XZ`: un envío cortado a media transmisión queda descartado en su
+buffer y no produce una etiqueta ZPL duplicada ni a medias.
+
 Manejo de errores:
-  - Timeout de conexión: 5 segundos
-  - Timeout de envío:    10 segundos
-  - Si la impresora está offline devuelve (False, mensaje) sin lanzar excepción.
+  - Timeout de conexión: ZEBRA_TIMEOUT (3 s por defecto), por intento
+  - Timeout de envío:    10 segundos, por intento
+  - Si ninguna Zebra responde devuelve (False, mensaje) sin lanzar excepción.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import List, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from models.order import NormalizedOrder
 
@@ -262,11 +268,84 @@ def build_zpl_note(order: NormalizedOrder, dpi: int = 203) -> str:
 
 # ── Comunicación TCP ─────────────────────────────────────────────
 
+ROLE_PRIMARY = "principal"
+ROLE_BACKUP  = "respaldo"
+
+# Nombre legible por rol. Se separa del valor de `role` porque ese viaja en el
+# JSON de la API y debe permanecer estable; esto es sólo texto para el operador.
+_ROLE_LABELS = {
+    ROLE_PRIMARY: "Zebra principal",
+    ROLE_BACKUP:  "Zebra de respaldo",
+}
+
+
+class PrinterTarget(NamedTuple):
+    """Un destino de impresión: una Zebra concreta y su rol en el failover."""
+    host: str
+    port: int
+    role: str   # ROLE_PRIMARY | ROLE_BACKUP
+
+    @property
+    def address(self) -> str:
+        return f"{self.host}:{self.port}"
+
+    @property
+    def label(self) -> str:
+        """Nombre legible para logs y mensajes al operador."""
+        return f"{_ROLE_LABELS.get(self.role, 'Zebra')} {self.address}"
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"host": self.host, "port": self.port, "role": self.role}
+
+
 class ZPLService:
-    def __init__(self, host: str, port: int = 9100, dpi: int = 203) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int = 9100,
+        dpi: int = 203,
+        backup_host: Optional[str] = None,
+        backup_port: int = 9101,
+        timeout: float = 3.0,
+    ) -> None:
         self.host = host
         self.port = port
         self.dpi  = dpi
+        self.backup_host = (backup_host or "").strip() or None
+        self.backup_port = backup_port
+        self.timeout = timeout
+
+        # Orden de preferencia. Sin respaldo configurado queda un solo
+        # destino y el comportamiento es el de siempre: un único intento.
+        self.targets: List[PrinterTarget] = [PrinterTarget(host, port, ROLE_PRIMARY)]
+        if self.backup_host:
+            self.targets.append(
+                PrinterTarget(self.backup_host, backup_port, ROLE_BACKUP)
+            )
+
+        # Última Zebra que aceptó una etiqueta ZPL en esta instancia. Los
+        # endpoints la leen para informar quién imprimió de verdad.
+        self.last_target: Optional[PrinterTarget] = None
+
+    @property
+    def has_backup(self) -> bool:
+        return len(self.targets) > 1
+
+    @property
+    def used_failover(self) -> bool:
+        """True si lo último que se imprimió salió por la Zebra de respaldo."""
+        return self.last_target is not None and self.last_target.role == ROLE_BACKUP
+
+    def _ordered_targets(self) -> List[PrinterTarget]:
+        """
+        Destinos a intentar, en orden. Si esta instancia ya cayó a la Zebra de
+        respaldo, esa pasa a ser la primera opción: así las dos etiquetas de un
+        mismo pedido (principal + nota) nunca se reparten entre dos Zebras.
+        """
+        if self.last_target is None:
+            return list(self.targets)
+        rest = [t for t in self.targets if t != self.last_target]
+        return [self.last_target, *rest]
 
     async def print_label(
         self, order: NormalizedOrder
@@ -295,38 +374,77 @@ class ZPLService:
 
         return True, ""
 
+    async def send_raw_zpl(self, zpl: str) -> Tuple[bool, str]:
+        """
+        Envía una etiqueta ZPL ya construida (p. ej. el ZPL nativo de Mercado
+        Libre) aplicando el failover. Alias público de `_send`.
+        """
+        return await self._send(zpl)
+
     async def _send(self, zpl: str) -> Tuple[bool, str]:
-        """Abre conexión TCP, envía ZPL y cierra. Totalmente asíncrono."""
+        """
+        Envía la etiqueta ZPL a la primera Zebra que la acepte.
+
+        Intenta los destinos en orden y cae a la Zebra de respaldo ante
+        timeout, conexión rechazada o cualquier otro error de red.
+        Retorna (True, "") o (False, mensaje). No lanza excepciones.
+        """
+        errors: List[str] = []
+        targets = self._ordered_targets()
+
+        for index, target in enumerate(targets):
+            ok, error = await self._send_to(target, zpl)
+            if ok:
+                if index > 0:
+                    logger.info(
+                        "Etiqueta ZPL enviada a %s tras el failover", target.label
+                    )
+                self.last_target = target
+                return True, ""
+
+            errors.append(f"{target.label}: {error}")
+            remaining = targets[index + 1:]
+            if remaining:
+                logger.warning(
+                    "%s no responde (%s) — reintentando la etiqueta ZPL en %s",
+                    target.label, error, remaining[0].label,
+                )
+
+        if len(errors) > 1:
+            msg = "Ninguna Zebra disponible — " + " | ".join(errors)
+            logger.critical(
+                "%s. Verificar ambas Zebras y el nodo puente de bodega.", msg
+            )
+        else:
+            msg = errors[0]
+            logger.error("No se pudo imprimir la etiqueta ZPL — %s", msg)
+
+        return False, msg
+
+    async def _send_to(self, target: PrinterTarget, zpl: str) -> Tuple[bool, str]:
+        """Abre conexión TCP contra una Zebra concreta, envía el ZPL y cierra."""
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=5.0,
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(target.host, target.port),
+                timeout=self.timeout,
             )
         except asyncio.TimeoutError:
-            msg = f"Impresora {self.host}:{self.port} no responde (timeout de conexión)"
-            logger.error(msg)
-            return False, msg
+            return False, "no responde (timeout de conexión)"
         except OSError as exc:
-            msg = f"No se pudo conectar a {self.host}:{self.port} — {exc}"
-            logger.error(msg)
-            return False, msg
+            return False, f"no se pudo conectar — {exc}"
 
         try:
             data = zpl.encode("utf-8")
             writer.write(data)
             await asyncio.wait_for(writer.drain(), timeout=10.0)
             logger.info(
-                "ZPL enviado a %s:%s (%d bytes)", self.host, self.port, len(data)
+                "Etiqueta ZPL enviada a %s (%d bytes)", target.label, len(data)
             )
             return True, ""
         except asyncio.TimeoutError:
-            msg = f"Timeout al enviar datos a {self.host}:{self.port}"
-            logger.error(msg)
-            return False, msg
+            return False, "timeout al enviar la etiqueta ZPL"
         except OSError as exc:
-            msg = f"Error de red al enviar ZPL — {exc}"
-            logger.error(msg)
-            return False, msg
+            return False, f"error de red al enviar la etiqueta ZPL — {exc}"
         finally:
             try:
                 writer.close()
@@ -334,17 +452,37 @@ class ZPLService:
             except Exception:
                 pass
 
-    async def test_connection(self) -> Tuple[bool, str]:
-        """Prueba la conectividad con la impresora sin enviar datos reales."""
+    async def _probe(self, target: PrinterTarget) -> Tuple[bool, str]:
+        """Comprueba conectividad con una Zebra sin enviar datos reales."""
         try:
             _, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.host, self.port),
-                timeout=5.0,
+                asyncio.open_connection(target.host, target.port),
+                timeout=self.timeout,
             )
             writer.close()
             await writer.wait_closed()
-            return True, f"Impresora alcanzable en {self.host}:{self.port}"
+            return True, f"{target.label} alcanzable"
         except asyncio.TimeoutError:
-            return False, f"Timeout — {self.host}:{self.port} no responde"
+            return False, f"{target.label} no responde (timeout)"
         except OSError as exc:
-            return False, f"Conexión rechazada — {exc}"
+            return False, f"{target.label} rechazó la conexión — {exc}"
+
+    async def test_targets(self) -> List[Dict[str, Any]]:
+        """Estado de conectividad de cada Zebra configurada, en orden."""
+        results: List[Dict[str, Any]] = []
+        for target in self.targets:
+            ok, msg = await self._probe(target)
+            results.append({**target.as_dict(), "reachable": ok, "message": msg})
+        return results
+
+    async def test_connection(self) -> Tuple[bool, str]:
+        """
+        Prueba la conectividad de impresión. Es exitosa si responde al menos
+        una Zebra, de modo que con la principal caída pero el respaldo vivo el
+        diagnóstico siga siendo "alcanzable".
+        """
+        results = await self.test_targets()
+        for result in results:
+            if result["reachable"]:
+                return True, result["message"]
+        return False, " | ".join(r["message"] for r in results)
